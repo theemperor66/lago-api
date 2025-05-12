@@ -17,8 +17,6 @@ jobs:
         platform:
           - version: linux/amd64
             runner: linux/amd64
-          - version: linux/arm64
-            runner: linux-arm64
     name: Build ${{ matrix.platform.version }} Image
     runs-on: ${{ matrix.platform.runner }}
     steps:

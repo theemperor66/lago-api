@@ -73,8 +73,10 @@ jobs:
       - name: Export Digest
         run: |
           mkdir -p "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests"
-          digest="${{ steps.build.outputs.digest }}"
-          touch "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests/${digest}"
+          full_digest="${{ steps.build.outputs.digest }}"
+          # Remove "sha256:" prefix to get a valid filename (the hash itself)
+          digest_filename="${full_digest#sha256:}"
+          touch "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests/${digest_filename}"
 
       - name: Upload Digest
         uses: actions/upload-artifact@v4

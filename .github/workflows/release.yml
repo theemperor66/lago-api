@@ -16,7 +16,7 @@ jobs:
       matrix:
         platform:
           - version: linux/amd64
-            runner: linux/amd64
+            runner: ubuntu-latest
     name: Build ${{ matrix.platform.version }} Image
     runs-on: ${{ matrix.platform.runner }}
     steps:

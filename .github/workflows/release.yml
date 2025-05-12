@@ -8,7 +8,6 @@ on:
       version:
         description: Version
         required: true
-
 permissions:
   contents: read
   packages: write
@@ -75,7 +74,7 @@ jobs:
         run: |
           mkdir -p "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests"
           digest="${{ steps.build.outputs.digest }}"
-          touch "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests/${digest
+          touch "./_tmp/${{ github.run_id }}/${{ github.run_attempt }}/digests/${digest}"
 
       - name: Upload Digest
         uses: actions/upload-artifact@v4

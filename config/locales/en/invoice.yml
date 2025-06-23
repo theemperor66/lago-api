@@ -43,7 +43,7 @@ en:
       flat_fee_for_the_next: Flat fee for the next %{from} to %{to}
     iban: IBAN
     invoice_number: Invoice Number
-    issue_date: Issue Date
+    issue_date: Invoice Date
     item: Item
     list_of_charges: List of charges used from %{from} to %{to}
     month: month
@@ -87,7 +87,7 @@ en:
     subscription_interval: "%{plan_interval} subscription - %{plan_name}"
     swift_code: SWIFT code
     tax: Tax
-    tax_identification_number: 'Tax ID: %{tax_identification_number}'
+    tax_identification_number: '(VAT-/Tax-)ID: %{tax_identification_number}'
     tax_name: "%{name} (%{rate}% on %{amount})"
     tax_name_only:
       customer_exempt: Customer is tax exempt

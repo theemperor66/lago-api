@@ -42,7 +42,7 @@ de:
       flat_fee_for_the_next: Pauschalgebühr für die nächsten %{from} bis %{to}
     iban: IBAN
     invoice_number: Rechnungsnummer
-    issue_date: Ausgabedatum
+    issue_date: Rechnungsdatum
     item: Artikel
     list_of_charges: Liste der Gebühren vom %{from} bis %{to}
     month: monat
@@ -86,7 +86,7 @@ de:
     subscription_interval: "%{plan_interval}es Abonnement - %{plan_name}"
     swift_code: SWIFT-Code
     tax: Steuern
-    tax_identification_number: 'Steuer ID: %{tax_identification_number}'
+    tax_identification_number: 'USt-ID: %{tax_identification_number}'
     tax_name: "%{name} (%{rate}% on %{amount})"
     tax_name_only:
       customer_exempt: Der Kunde ist von der Umsatzsteuer befreit

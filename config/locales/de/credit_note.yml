@@ -11,7 +11,7 @@ de:
     credited_refunded_notice: Auf Kundenguthaben gutgeschrieben und zurückerstattet am %{issuing_date}
     document_name: Gutschrift
     invoice_number: Rechnungsnummer
-    issue_date: Ausgabedatum
+    issue_date: Rechnungsdatum
     item: Artikel
     powered_by: Bereitgestellt von
     prepaid_credits_for_wallet: Prepaid-Guthaben - %{wallet_name}

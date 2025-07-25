@@ -20,5 +20,11 @@ RSpec.describe WalletTransactions::SettleService, type: :service do
         service.call
       end.to have_enqueued_job(SendWebhookJob).with("wallet_transaction.updated", WalletTransaction)
     end
+
+    it "produces an activity log" do
+      described_class.call(wallet_transaction:)
+
+      expect(Utils::ActivityLog).to have_produced("wallet_transaction.updated").after_commit.with(wallet_transaction)
+    end
   end
 end

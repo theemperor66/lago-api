@@ -43,6 +43,12 @@ RSpec.describe AppliedCoupons::CreateService, type: :service do
       expect(create_result.applied_coupon.amount_currency).to eq(coupon.amount_currency)
     end
 
+    it "produces an activity log" do
+      applied_coupon = described_class.call(customer:, coupon:, params:).applied_coupon
+
+      expect(Utils::ActivityLog).to have_produced("applied_coupon.created").after_commit.with(applied_coupon)
+    end
+
     context "when coupon type is percentage" do
       let(:coupon) do
         create(

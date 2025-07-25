@@ -157,5 +157,60 @@ RSpec.describe Wallets::ValidateService, type: :service do
         expect(result.error.messages[:recurring_transaction_rules]).to eq(["invalid_number_of_recurring_rules"])
       end
     end
+
+    context "with limitations" do
+      let(:limitations) do
+        {
+          fee_types: %w[invalid charge]
+        }
+      end
+      let(:args) do
+        {
+          customer:,
+          organization_id: organization.id,
+          paid_credits:,
+          granted_credits:,
+          applies_to: limitations
+        }
+      end
+
+      it "returns false and result has errors if fee type is invalid" do
+        expect(validate_service).not_to be_valid
+        expect(result.error.messages[:applies_to]).to eq(["invalid_limitations"])
+      end
+
+      context "with billable metric limitations" do
+        let(:billable_metric) { create(:billable_metric, organization:) }
+        let(:billable_metric_identifiers) { [billable_metric.id, "invalid"] }
+        let(:limitations) do
+          {
+            billable_metric_ids: billable_metric_identifiers
+          }
+        end
+
+        before do
+          result.billable_metrics = [billable_metric]
+          result.billable_metric_identifiers = billable_metric_identifiers
+        end
+
+        it "returns false and result has errors if BM is invalid" do
+          expect(validate_service).not_to be_valid
+          expect(result.error.messages[:applies_to]).to eq(["invalid_limitations"])
+        end
+      end
+
+      context "when limitations are valid" do
+        let(:limitations) do
+          {
+            fee_types: %w[charge]
+          }
+        end
+
+        it "returns true and result has no errors" do
+          expect(validate_service).to be_valid
+          expect(result.error).to be_nil
+        end
+      end
+    end
   end
 end

@@ -68,7 +68,7 @@ module Api
               ::V1::WalletSerializer,
               collection_name: "wallets",
               meta: pagination_metadata(result.wallets),
-              includes: %i[recurring_transaction_rules]
+              includes: %i[recurring_transaction_rules limitations]
             )
           )
         else
@@ -106,6 +106,10 @@ module Api
               :key,
               :value
             ]
+          ],
+          applies_to: [
+            fee_types: [],
+            billable_metric_codes: []
           ]
         )
       end
@@ -135,6 +139,10 @@ module Api
               :key,
               :value
             ]
+          ],
+          applies_to: [
+            fee_types: [],
+            billable_metric_codes: []
           ]
         )
       end
@@ -148,7 +156,7 @@ module Api
           json: ::V1::WalletSerializer.new(
             wallet,
             root_name: "wallet",
-            includes: %i[recurring_transaction_rules]
+            includes: %i[recurring_transaction_rules limitations]
           )
         )
       end

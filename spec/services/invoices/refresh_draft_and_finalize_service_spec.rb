@@ -7,12 +7,14 @@ RSpec.describe Invoices::RefreshDraftAndFinalizeService, type: :service do
 
   describe "#call" do
     let(:organization) { create(:organization) }
-    let(:customer) { create(:customer, organization:) }
+    let(:billing_entity) { create(:billing_entity, organization:) }
+    let(:customer) { create(:customer, organization:, billing_entity:) }
 
     let(:invoice) do
       create(
         :invoice,
         :draft,
+        :with_subscriptions,
         organization:,
         customer:,
         subscriptions: [subscription],
@@ -102,6 +104,12 @@ RSpec.describe Invoices::RefreshDraftAndFinalizeService, type: :service do
       expect do
         finalize_service.call
       end.to have_enqueued_job(SendWebhookJob).with("invoice.created", Invoice)
+    end
+
+    it "produces an activity log" do
+      described_class.call(invoice:)
+
+      expect(Utils::ActivityLog).to have_produced("invoice.created").with(invoice)
     end
 
     it "enqueues GeneratePdfAndNotifyJob with email false" do
@@ -212,6 +220,12 @@ RSpec.describe Invoices::RefreshDraftAndFinalizeService, type: :service do
         end.to have_enqueued_job(SendWebhookJob).with("credit_note.created", CreditNote)
       end
 
+      it "produces an activity log" do
+        result = finalize_service.call
+
+        expect(Utils::ActivityLog).to have_produced("credit_note.created").with(result.invoice.credit_notes.first)
+      end
+
       it "enqueues CreditNotes::GeneratePdfJob" do
         expect do
           finalize_service.call
@@ -275,6 +289,7 @@ RSpec.describe Invoices::RefreshDraftAndFinalizeService, type: :service do
         create(
           :invoice,
           :failed,
+          :with_subscriptions,
           customer:,
           subscriptions: [subscription],
           currency: "EUR",

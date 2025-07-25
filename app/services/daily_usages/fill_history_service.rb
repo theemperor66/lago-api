@@ -4,9 +4,11 @@ require "timecop"
 
 module DailyUsages
   class FillHistoryService < BaseService
-    def initialize(subscription:, from_datetime:)
+    def initialize(subscription:, from_datetime:, to_datetime: nil, sandbox: false)
       @subscription = subscription
       @from_datetime = from_datetime
+      @to_datetime = to_datetime
+      @sandbox = sandbox
 
       super
     end
@@ -18,10 +20,18 @@ module DailyUsages
         datetime = date.in_time_zone(subscription.customer.applicable_timezone).beginning_of_day.utc
         datetime = date.beginning_of_day.utc if datetime < date # Handle last day for timezone with positive offset
 
-        next if subscription.daily_usages.where(usage_date: datetime.to_date - 1.day).exists?
+        next if !sandbox && subscription.daily_usages.where(usage_date: datetime.to_date - 1.day).exists?
+
+        ds = Subscriptions::DatesService.new_instance(subscription, date, current_usage: true)
+
+        time_to_freeze = if ds.previous_beginning_of_period.to_date == date
+          (datetime - 1.day).end_of_day
+        else
+          datetime + 1.second
+        end
 
         Timecop.thread_safe = true
-        Timecop.freeze(datetime + 5.minutes) do
+        Timecop.freeze(time_to_freeze) do
           usage = Invoices::CustomerUsageService.call(
             customer: subscription.customer,
             subscription: subscription,
@@ -29,6 +39,7 @@ module DailyUsages
             with_cache: false,
             max_to_datetime: datetime
           ).raise_if_error!.usage
+          next if sandbox
 
           if previous_daily_usage.present? && previous_daily_usage.from_datetime != usage.from_datetime
             # NOTE: A new billing period was started, the diff should contains the complete current usage
@@ -79,7 +90,7 @@ module DailyUsages
       result
     end
 
-    attr_reader :subscription, :from_datetime
+    attr_reader :subscription, :from_datetime, :to_datetime, :sandbox
     delegate :organization, to: :subscription
 
     def from
@@ -91,7 +102,11 @@ module DailyUsages
     end
 
     def to
-      @to ||= (subscription.terminated_at || Time.current).to_date
+      @to ||= if subscription.terminated?
+        subscription.terminated_at.to_date
+      else
+        (to_datetime || Time.current).to_date
+      end
     end
   end
 end

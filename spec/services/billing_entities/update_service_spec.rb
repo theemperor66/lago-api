@@ -6,6 +6,7 @@ RSpec.describe BillingEntities::UpdateService do
   subject(:update_service) { described_class.new(billing_entity:, params:) }
 
   let(:billing_entity) { create(:billing_entity) }
+  let(:organization) { billing_entity.organization }
 
   let(:timezone) { nil }
   let(:email_settings) { [] }
@@ -58,6 +59,12 @@ RSpec.describe BillingEntities::UpdateService do
 
       expect(result.billing_entity.invoice_footer).to eq("invoice footer")
       expect(result.billing_entity.document_locale).to eq("fr")
+    end
+
+    it "produces an activity log" do
+      described_class.call(billing_entity:, params:)
+
+      expect(Utils::ActivityLog).to have_produced("billing_entities.updated").after_commit.with(billing_entity)
     end
 
     context "when document_number_prefix is sent" do
@@ -163,6 +170,21 @@ RSpec.describe BillingEntities::UpdateService do
       end
     end
 
+    context "when logo is set but then removed" do
+      let(:logo) do
+        logo_file = File.read(Rails.root.join("spec/factories/images/logo.png"))
+        base64_logo = Base64.encode64(logo_file)
+
+        "data:image/png;base64,#{base64_logo}"
+      end
+
+      it "removes the logo" do
+        update_service.call
+        result = described_class.new(billing_entity:, params: {logo: nil}).call
+        expect(result.billing_entity.logo.blob).to be_nil
+      end
+    end
+
     context "with validation errors" do
       let(:country) { "---" }
 
@@ -227,6 +249,107 @@ RSpec.describe BillingEntities::UpdateService do
           expect(result).to be_success
           expect(BillingEntities::ChangeEuTaxManagementService)
             .to have_received(:call)
+        end
+      end
+    end
+
+    context "when updating invoice_custom_sections" do
+      let(:params) { {invoice_custom_section_ids: [invoice_custom_section_1.id, invoice_custom_section_2.id]} }
+
+      let(:invoice_custom_section_1) { create(:invoice_custom_section, organization:) }
+      let(:invoice_custom_section_2) { create(:invoice_custom_section, organization:) }
+
+      it "updates the billing_entity" do
+        result = update_service.call
+
+        expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1, invoice_custom_section_2)
+      end
+
+      context "when removing a section" do
+        let(:params) { {invoice_custom_section_ids: [invoice_custom_section_1.id]} }
+
+        before do
+          create(:billing_entity_applied_invoice_custom_section, organization:, billing_entity:, invoice_custom_section: invoice_custom_section_2)
+        end
+
+        it "removes the section" do
+          result = update_service.call
+
+          expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1)
+        end
+      end
+
+      context "when adding a section" do
+        let(:params) { {invoice_custom_section_ids: [invoice_custom_section_1.id, invoice_custom_section_2.id]} }
+
+        before do
+          create(:billing_entity_applied_invoice_custom_section, billing_entity:, invoice_custom_section: invoice_custom_section_2)
+        end
+
+        it "adds the section" do
+          result = update_service.call
+
+          expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1, invoice_custom_section_2)
+        end
+      end
+
+      context "when removing all sections" do
+        let(:params) { {invoice_custom_section_ids: []} }
+
+        it "removes all sections" do
+          result = update_service.call
+
+          expect(result.billing_entity.selected_invoice_custom_sections).to be_empty
+        end
+      end
+
+      context "when invoice_custom_section_codes are provided" do
+        let(:params) do
+          {invoice_custom_section_codes: [invoice_custom_section_1.code, invoice_custom_section_2.code]}
+        end
+
+        it "updates the billing_entity" do
+          result = update_service.call
+
+          expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1, invoice_custom_section_2)
+        end
+
+        context "when removing a section" do
+          let(:params) { {invoice_custom_section_codes: [invoice_custom_section_1.code]} }
+
+          before do
+            create(:billing_entity_applied_invoice_custom_section, organization:, billing_entity:, invoice_custom_section: invoice_custom_section_2)
+          end
+
+          it "removes the section" do
+            result = update_service.call
+
+            expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1)
+          end
+        end
+
+        context "when adding a section" do
+          let(:params) { {invoice_custom_section_codes: [invoice_custom_section_1.code, invoice_custom_section_2.code]} }
+
+          before do
+            create(:billing_entity_applied_invoice_custom_section, billing_entity:, invoice_custom_section: invoice_custom_section_2)
+          end
+
+          it "adds the section" do
+            result = update_service.call
+
+            expect(result.billing_entity.selected_invoice_custom_sections).to contain_exactly(invoice_custom_section_1, invoice_custom_section_2)
+          end
+        end
+
+        context "when removing all sections" do
+          let(:params) { {invoice_custom_section_cods: []} }
+
+          it "removes all sections" do
+            result = update_service.call
+
+            expect(result.billing_entity.selected_invoice_custom_sections).to be_empty
+          end
         end
       end
     end

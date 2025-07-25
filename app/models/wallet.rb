@@ -5,13 +5,18 @@ class Wallet < ApplicationRecord
   include Currencies
 
   belongs_to :customer, -> { with_discarded }
-
-  has_one :organization, through: :customer
+  belongs_to :organization
 
   has_many :wallet_transactions
   has_many :recurring_transaction_rules
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :wallet_targets
+  has_many :billable_metrics, through: :wallet_targets
+
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    as: :resource
 
   monetize :balance_cents
   monetize :consumed_amount_cents
@@ -43,6 +48,14 @@ class Wallet < ApplicationRecord
   def currency
     balance_currency
   end
+
+  def limited_fee_types?
+    allowed_fee_types.present?
+  end
+
+  def limited_to_billable_metrics?
+    billable_metrics.any?
+  end
 end
 
 # == Schema Information
@@ -50,6 +63,7 @@ end
 # Table name: wallets
 #
 #  id                                  :uuid             not null, primary key
+#  allowed_fee_types                   :string           default([]), not null, is an Array
 #  balance_cents                       :bigint           default(0), not null
 #  balance_currency                    :string           not null
 #  consumed_amount_cents               :bigint           default(0), not null
@@ -63,6 +77,7 @@ end
 #  invoice_requires_successful_payment :boolean          default(FALSE), not null
 #  last_balance_sync_at                :datetime
 #  last_consumed_credit_at             :datetime
+#  last_ongoing_balance_sync_at        :datetime
 #  lock_version                        :integer          default(0), not null
 #  name                                :string
 #  ongoing_balance_cents               :bigint           default(0), not null
@@ -74,7 +89,7 @@ end
 #  created_at                          :datetime         not null
 #  updated_at                          :datetime         not null
 #  customer_id                         :uuid             not null
-#  organization_id                     :uuid
+#  organization_id                     :uuid             not null
 #
 # Indexes
 #

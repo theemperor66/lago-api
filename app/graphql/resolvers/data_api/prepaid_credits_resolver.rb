@@ -24,7 +24,10 @@ module Resolvers
       argument :external_customer_id, String, required: false
       argument :external_subscription_id, String, required: false
 
+      argument :billing_entity_code, String, required: false
       argument :plan_code, String, required: false
+
+      argument :is_customer_tin_empty, Boolean, required: false
 
       type Types::DataApi::PrepaidCredits::Object.collection_type, null: false
 

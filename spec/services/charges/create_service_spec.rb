@@ -3,86 +3,65 @@
 require "rails_helper"
 
 RSpec.describe Charges::CreateService, type: :service do
-  subject(:create_service) { described_class.new(plan:, params:) }
+  let(:create_service) { described_class.new(plan:, params:) }
 
-  let(:membership) { create(:membership) }
-  let(:organization) { membership.organization }
-  let(:plan) { create(:plan, organization:) }
-
-  before { plan }
+  let(:plan) { create(:plan) }
+  let(:organization) { plan.organization }
 
   describe "#call" do
-    let(:sum_billable_metric) { create(:sum_billable_metric, organization:, recurring: true) }
-    let(:params) { {} }
+    subject(:result) { create_service.call }
 
     context "when plan is not found" do
       let(:plan) { nil }
+      let(:params) { {} }
 
       it "returns an error" do
-        result = create_service.call
-
-        aggregate_failures do
-          expect(result).not_to be_success
-          expect(result.error.error_code).to eq("plan_not_found")
-        end
+        expect(result).not_to be_success
+        expect(result.error.error_code).to eq("plan_not_found")
       end
     end
 
-    context "when charge model is premium" do
-      let(:params) do
-        {
-          billable_metric_id: sum_billable_metric.id,
-          charge_model: "graduated_percentage",
-          pay_in_advance: false,
-          invoiceable: true,
-          properties: {
-            graduated_percentage_ranges: [
-              {
-                from_value: 0,
-                to_value: 10,
-                rate: "3",
-                flat_amount: "0"
-              },
-              {
-                from_value: 11,
-                to_value: nil,
-                rate: "2",
-                flat_amount: "3"
-              }
-            ]
+    context "when plan exists" do
+      let(:sum_billable_metric) { create(:sum_billable_metric, organization:, recurring: true) }
+
+      context "when params are invalid" do
+        let(:params) do
+          {
+            billable_metric_id: sum_billable_metric.id,
+            charge_model: "graduated_percentage",
+            properties: {
+              graduated_percentage_ranges: [
+                {
+                  from_value: 0,
+                  to_value: 10,
+                  rate: "3",
+                  flat_amount: "0"
+                },
+                {
+                  from_value: 11,
+                  to_value: nil,
+                  rate: "2",
+                  flat_amount: "3"
+                }
+              ]
+            }
           }
-        }
-      end
+        end
 
-      it "returns an error" do
-        result = create_service.call
-
-        aggregate_failures do
+        it "returns an error" do
           expect(result).not_to be_success
           expect(result.error).to be_a(BaseService::ValidationFailure)
-          expect(result.error.messages[:charge_model]).to eq(["value_is_mandatory"])
+          expect(result.error.messages[:charge_model]).to eq(["graduated_percentage_requires_premium_license"])
+        end
+
+        it "does not create charge" do
+          expect { subject }.not_to change(Charge, :count)
         end
       end
 
-      context "with premium license" do
-        around { |test| lago_premium!(&test) }
-
-        it "saves premium charge model" do
-          create_service.call
-
-          expect(plan.reload.charges.graduated_percentage.first).to have_attributes(
-            {
-              organization_id: organization.id,
-              pay_in_advance: false,
-              invoiceable: true,
-              charge_model: "graduated_percentage"
-            }
-          )
-        end
-      end
-
-      context "when charge is successfully added" do
-        let(:parent_charge) { build(:standard_charge) }
+      context "when params are valid" do
+        let!(:parent_charge) { create(:standard_charge) }
+        let(:pricing_unit) { create(:pricing_unit, organization:) }
         let(:billable_metric_filter) do
           create(
             :billable_metric_filter,
@@ -94,6 +73,7 @@ RSpec.describe Charges::CreateService, type: :service do
 
         let(:params) do
           {
+            applied_pricing_unit: applied_pricing_unit_params,
             billable_metric_id: sum_billable_metric.id,
             charge_model: "standard",
             pay_in_advance: false,
@@ -111,16 +91,22 @@ RSpec.describe Charges::CreateService, type: :service do
           }
         end
 
+        let(:applied_pricing_unit_params) do
+          {
+            code: pricing_unit.code,
+            conversion_rate: rand(0.1..5.0)
+          }
+        end
+
         it "creates new charge" do
-          expect { create_service.call }.to change(Charge, :count).by(1)
+          expect { subject }.to change(Charge, :count).by(1)
         end
 
         it "sets correctly attributes" do
-          create_service.call
+          subject
 
-          stored_charge = plan.reload.charges.first
-
-          expect(stored_charge.reload).to have_attributes(
+          created_charge = plan.reload.charges.first
+          expect(created_charge).to have_attributes(
             organization_id: organization.id,
             prorated: true,
             pay_in_advance: false,
@@ -128,37 +114,70 @@ RSpec.describe Charges::CreateService, type: :service do
             properties: {"amount" => "0"}
           )
 
-          expect(stored_charge.filters.first).to have_attributes(
+          created_filter = created_charge.filters.first
+          expect(created_filter).to have_attributes(
             invoice_display_name: "Card filter",
             properties: {"amount" => "90"}
           )
-          expect(stored_charge.filters.first.values.first).to have_attributes(
+
+          created_filter_value = created_charge.filters.first.values.first
+          expect(created_filter_value).to have_attributes(
             billable_metric_filter_id: billable_metric_filter.id,
             values: ["card"]
           )
         end
 
-        it "does not update premium attributes" do
-          create_service.call
-
-          stored_charge = plan.reload.charges.first
-
-          expect(stored_charge).to have_attributes(invoiceable: true, min_amount_cents: 0)
-        end
-
         context "when premium" do
           around { |test| lago_premium!(&test) }
 
-          it "saves premium attributes" do
-            create_service.call
+          it "assigns premium attributes values from params" do
+            expect(result.charge)
+              .to be_persisted
+              .and have_attributes(invoiceable: false, min_amount_cents: 10)
+          end
 
-            stored_charge = plan.reload.charges.first
+          context "when applied pricing unit params are valid" do
+            it "creates applied pricing unit" do
+              expect { subject }.to change(AppliedPricingUnit, :count).by(1)
+            end
+          end
 
-            expect(stored_charge).to have_attributes(
-              organization_id: organization.id,
-              invoiceable: false,
-              min_amount_cents: 10
-            )
+          context "when applied pricing unit params are invalid" do
+            let(:applied_pricing_unit_params) do
+              {
+                code: "non-existing-code",
+                conversion_rate: -5
+              }
+            end
+
+            it "fails with a validation error" do
+              expect(result).to be_failure
+
+              expect(result.error.messages).to match(
+                conversion_rate: ["value_is_out_of_range"],
+                pricing_unit: ["relation_must_exist"]
+              )
+            end
+
+            it "does not create charge" do
+              expect { subject }.not_to change(Charge, :count)
+            end
+
+            it "does not create applied pricing unit" do
+              expect { subject }.not_to change(AppliedPricingUnit, :count)
+            end
+          end
+        end
+
+        context "when freemium" do
+          it "assigns premium attributes default values no matter of values in params" do
+            expect(result.charge)
+              .to be_persisted
+              .and have_attributes(invoiceable: true, min_amount_cents: 0)
+          end
+
+          it "does not create applied pricing units" do
+            expect { subject }.not_to change(AppliedPricingUnit, :count)
           end
         end
       end

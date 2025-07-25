@@ -13,6 +13,12 @@ RSpec.describe BillingEntities::CreateService, type: :service do
     }
   end
 
+  it "produces an activity log" do
+    billing_entity = result.billing_entity
+
+    expect(Utils::ActivityLog).to have_produced("billing_entities.created").after_commit.with(billing_entity)
+  end
+
   context "when lago freemium" do
     it "returns an error" do
       expect(result).to be_failure

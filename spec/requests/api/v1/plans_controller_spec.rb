@@ -36,7 +36,11 @@ RSpec.describe Api::V1::PlansController, type: :request do
             properties: {
               amount: "0.22"
             },
-            tax_codes:
+            tax_codes:,
+            applied_pricing_unit: {
+              code: pricing_unit.code,
+              conversion_rate: 1.25
+            }
           }
         ],
         usage_thresholds: [
@@ -46,6 +50,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
       }
     end
     let(:tax_codes) { [tax.code] }
+    let(:pricing_unit) { create(:pricing_unit, organization:) }
 
     context "when interval is empty" do
       let(:interval) { nil }
@@ -86,6 +91,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
           charge = json[:plan][:charges].first
           expect(charge[:invoiceable]).to be true
           expect(charge[:regroup_paid_fees]).to be_nil
+          expect(charge[:applied_pricing_unit]).to be_nil
         end
       end
 
@@ -99,6 +105,11 @@ RSpec.describe Api::V1::PlansController, type: :request do
           charge = json[:plan][:charges].first
           expect(charge[:invoiceable]).to be false
           expect(charge[:regroup_paid_fees]).to eq "invoice"
+
+          expect(charge[:applied_pricing_unit]).to eq({
+            conversion_rate: "1.25",
+            code: pricing_unit.code
+          })
         end
       end
 
@@ -243,12 +254,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
 
         it "returns a 404 response" do
           subject
-
-          aggregate_failures do
-            expect(response).to have_http_status(:not_found)
-            expect(json[:error]).to eq("Not Found")
-            expect(json[:code]).to eq("tax_not_found")
-          end
+          expect(response).to be_not_found_error("tax")
         end
       end
     end
@@ -324,6 +330,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
       expect(response).to have_http_status(:success)
       expect(json[:plan][:lago_id]).to eq(plan.id)
       expect(json[:plan][:code]).to eq(update_params[:code])
+      expect(json[:plan][:entitlements]).to be_empty
     end
 
     context "when plan does not exist" do
@@ -533,6 +540,31 @@ RSpec.describe Api::V1::PlansController, type: :request do
         end
       end
     end
+
+    describe "update conversion rate on charges" do
+      let(:charge) { create(:standard_charge, plan:, billable_metric:) }
+      let!(:applied_pricing_unit) { create(:applied_pricing_unit, pricing_unitable: charge) }
+
+      let(:charges_params) do
+        [
+          {
+            id: charge.id,
+            charge_model: "standard",
+            billable_metric_id: billable_metric.id,
+            applied_pricing_unit: {
+              conversion_rate: "3.9"
+            }
+          }
+        ]
+      end
+
+      around { |test| lago_premium!(&test) }
+
+      it "updates conversion rate on charge's applied pricing unit" do
+        expect { subject }.to change { applied_pricing_unit.reload.conversion_rate }.to(3.9)
+        expect(response).to have_http_status(:success)
+      end
+    end
   end
 
   describe "GET /api/v1/plans/:code" do
@@ -549,6 +581,17 @@ RSpec.describe Api::V1::PlansController, type: :request do
       expect(response).to have_http_status(:success)
       expect(json[:plan][:lago_id]).to eq(plan.id)
       expect(json[:plan][:code]).to eq(plan.code)
+    end
+
+    context "when plan is discarded" do
+      before do
+        plan.discard
+      end
+
+      it "returns not found" do
+        subject
+        expect(response).to have_http_status(:not_found)
+      end
     end
 
     context "when plan has minimum commitment" do
@@ -577,6 +620,25 @@ RSpec.describe Api::V1::PlansController, type: :request do
         expect(json[:plan][:lago_id]).to eq(plan.id)
         expect(json[:plan][:code]).to eq(plan.code)
         expect(json[:plan][:usage_thresholds].count).to eq(2)
+      end
+    end
+
+    context "when plan has entitlements" do
+      before do
+        feature = create(:feature, organization:, code: :seats)
+        entitlement = create(:entitlement, plan:, feature:)
+        privileges = create_list(:privilege, 2, feature: feature)
+        create(:entitlement_value, privilege: privileges.first, entitlement: entitlement)
+        create(:entitlement_value, privilege: privileges.last, entitlement: entitlement)
+      end
+
+      it "returns a plan" do
+        subject
+
+        expect(response).to have_http_status(:success)
+        ent = json[:plan][:entitlements].sole
+        expect(ent[:code]).to eq "seats"
+        expect(ent[:privileges].count).to eq 2
       end
     end
 
@@ -616,6 +678,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
         expect(response).to have_http_status(:success)
         expect(json[:plan][:lago_id]).to eq(plan.id)
         expect(json[:plan][:code]).to eq(plan.code)
+        expect(json[:plan][:entitlements]).to be_empty
       end
     end
 
@@ -677,6 +740,7 @@ RSpec.describe Api::V1::PlansController, type: :request do
         expect(response).to have_http_status(:success)
 
         expect(json[:plans].count).to eq(1)
+        expect(json[:plans].first[:entitlements]).to be_empty
         expect(json[:meta][:current_page]).to eq(1)
         expect(json[:meta][:next_page]).to eq(2)
         expect(json[:meta][:prev_page]).to eq(nil)

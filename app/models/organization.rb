@@ -4,6 +4,9 @@ class Organization < ApplicationRecord
   include PaperTrailTraceable
   include OrganizationTimezone
   include Currencies
+  include Organizations::AuthenticationMethods
+
+  self.ignored_columns += [:clickhouse_aggregation]
 
   EMAIL_SETTINGS = [
     "invoice.finalized",
@@ -18,21 +21,26 @@ class Organization < ApplicationRecord
   }.freeze
 
   has_many :activity_logs, class_name: "Clickhouse::ActivityLog"
+  has_many :api_logs, class_name: "Clickhouse::ApiLog"
   has_many :api_keys
   has_many :billing_entities, -> { active }
   has_many :all_billing_entities, class_name: "BillingEntity"
   has_many :memberships
+  has_many :active_memberships, -> { active }, class_name: "Membership"
+  has_many :admins_memberships, -> { active.admin }, class_name: "Membership"
   has_many :users, through: :memberships
+  has_many :admins, through: :admins_memberships, source: :user
   has_many :billable_metrics
   has_many :plans
+  has_many :pricing_units
   has_many :customers
-  has_many :subscriptions, through: :customers
+  has_many :subscriptions
   has_many :invoices
-  has_many :credit_notes, through: :invoices
-  has_many :fees, through: :subscriptions
+  has_many :credit_notes
+  has_many :fees
   has_many :events
   has_many :coupons
-  has_many :applied_coupons, through: :coupons
+  has_many :applied_coupons
   has_many :add_ons
   has_many :daily_usages
   has_many :invites
@@ -40,17 +48,24 @@ class Organization < ApplicationRecord
   has_many :payment_providers, class_name: "PaymentProviders::BaseProvider"
   has_many :payment_requests
   has_many :taxes
-  has_many :wallets, through: :customers
-  has_many :wallet_transactions, through: :wallets
+  has_many :wallets
+  has_many :wallet_transactions
   has_many :webhook_endpoints
-  has_many :webhooks, through: :webhook_endpoints
+  has_many :webhooks
   has_many :cached_aggregations
   has_many :data_exports
   has_many :error_details
   has_many :dunning_campaigns
   has_many :activity_logs, class_name: "Clickhouse::ActivityLog"
+  has_many :features, class_name: "Entitlement::Feature"
+  has_many :privileges, class_name: "Entitlement::Privilege"
+  has_many :entitlements, class_name: "Entitlement::Entitlement"
+  has_many :entitlement_values, class_name: "Entitlement::EntitlementValue"
+  has_many :subscription_feature_removals, class_name: "Entitlement::SubscriptionFeatureRemoval"
 
   has_many :subscription_activities, class_name: "UsageMonitoring::SubscriptionActivity"
+  has_many :alerts, class_name: "UsageMonitoring::Alert"
+  has_many :triggered_alerts, class_name: "UsageMonitoring::TriggeredAlert"
 
   has_many :stripe_payment_providers, class_name: "PaymentProviders::StripeProvider"
   has_many :gocardless_payment_providers, class_name: "PaymentProviders::GocardlessProvider"
@@ -66,10 +81,8 @@ class Organization < ApplicationRecord
   has_one :default_billing_entity, -> { active.order(created_at: :asc) }, class_name: "BillingEntity"
 
   has_many :invoice_custom_sections
-  has_many :invoice_custom_section_selections
-  has_many :manual_invoice_custom_sections, -> { where(section_type: :manual) }, class_name: "InvoiceCustomSection"
-  has_many :system_generated_invoice_custom_sections, -> { where(section_type: :system_generated) }, class_name: "InvoiceCustomSection"
-  has_many :selected_invoice_custom_sections, through: :invoice_custom_section_selections, source: :invoice_custom_section
+  has_many :manual_invoice_custom_sections, -> { where(section_type: "manual") }, class_name: "InvoiceCustomSection"
+  has_many :system_generated_invoice_custom_sections, -> { where(section_type: "system_generated") }, class_name: "InvoiceCustomSection"
 
   has_one_attached :logo
 
@@ -140,8 +153,8 @@ class Organization < ApplicationRecord
     end
   end
 
-  def admins
-    users.joins(:memberships).merge!(memberships.admin)
+  def using_lifetime_usage?
+    lifetime_usage_enabled? || progressive_billing_enabled?
   end
 
   def logo_url
@@ -180,15 +193,6 @@ class Organization < ApplicationRecord
     super(value&.upcase)
   end
 
-  def reset_customers_last_dunning_campaign_attempt
-    customers
-      .falling_back_to_default_dunning_campaign
-      .update_all( # rubocop:disable Rails/SkipsModelValidations
-        last_dunning_campaign_attempt: 0,
-        last_dunning_campaign_attempt_at: nil
-      )
-  end
-
   def from_email_address
     return email if from_email_enabled?
 
@@ -215,6 +219,10 @@ class Organization < ApplicationRecord
     return default_billing_entity.timezone if default_billing_entity
 
     super
+  end
+
+  def postgres_events_store?
+    !clickhouse_events_store?
   end
 
   private
@@ -254,8 +262,8 @@ end
 #  address_line1                :string
 #  address_line2                :string
 #  api_key                      :string
+#  authentication_methods       :string           default(["email_password", "google_oauth"]), not null, is an Array
 #  city                         :string
-#  clickhouse_aggregation       :boolean          default(FALSE), not null
 #  clickhouse_events_store      :boolean          default(FALSE), not null
 #  country                      :string
 #  custom_aggregation           :boolean          default(FALSE)

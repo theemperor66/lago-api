@@ -8,6 +8,12 @@ module Plans
       super
     end
 
+    activity_loggable(
+      action: "plan.updated",
+      record: -> { plan },
+      condition: -> { plan&.parent_id.nil? }
+    )
+
     def call
       return result.not_found_failure!(resource: "plan") unless plan
 
@@ -62,6 +68,7 @@ module Plans
 
       plan.invoices.draft.update_all(ready_to_be_refreshed: true) # rubocop:disable Rails/SkipsModelValidations
 
+      SendWebhookJob.perform_after_commit("plan.updated", plan)
       result.plan = plan.reload
       result
     rescue ActiveRecord::RecordInvalid => e
@@ -92,45 +99,34 @@ module Plans
       end
     end
 
-    def cascade_charge_creation(payload_charge)
+    def cascade_charge_creation(charge, payload_charge)
       return unless cascade?
       return if plan.children.empty?
 
-      plan.children.find_each do |p|
-        Charges::CreateJob.perform_later(plan: p, params: payload_charge)
-      end
+      Charges::CreateChildrenJob.perform_later(charge:, payload: payload_charge)
     end
 
     def cascade_charge_removal(charge)
       return unless cascade?
       return if plan.children.empty?
 
-      plan.children.includes(:charges).find_each do |p|
-        child_charge = p.charges.find { |c| c.parent_id == charge.id }
-
-        Charges::DestroyJob.perform_later(charge: child_charge) if child_charge
-      end
+      Charges::DestroyChildrenJob.perform_later(charge.id)
     end
 
     def cascade_charge_update(charge, payload_charge)
       return unless cascade?
       return if plan.children.empty?
 
-      plan.children.includes(:charges).find_each do |p|
-        child_charge = p.charges.find { |c| c.parent_id == charge.id }
+      old_parent_attrs = charge.attributes
+      old_parent_filters_attrs = charge.filters.map(&:attributes)
+      old_parent_applied_pricing_unit_attrs = charge.applied_pricing_unit&.attributes
 
-        if child_charge
-          Charges::UpdateJob.perform_later(
-            charge: child_charge,
-            params: payload_charge.deep_stringify_keys,
-            cascade_options: {
-              cascade: true,
-              parent_filters: charge.filters.map(&:attributes),
-              equal_properties: charge.equal_properties?(child_charge)
-            }
-          )
-        end
-      end
+      Charges::UpdateChildrenJob.perform_later(
+        params: payload_charge.deep_stringify_keys,
+        old_parent_attrs:,
+        old_parent_filters_attrs:,
+        old_parent_applied_pricing_unit_attrs:
+      )
     end
 
     def cascade?
@@ -173,10 +169,9 @@ module Plans
           next
         end
 
-        create_charge_result = Charges::CreateService.call(plan:, params: payload_charge)
-        create_charge_result.raise_if_error!
+        create_charge_result = Charges::CreateService.call!(plan:, params: payload_charge)
 
-        after_commit { cascade_charge_creation(payload_charge.merge(parent_id: create_charge_result.charge.id)) }
+        after_commit { cascade_charge_creation(create_charge_result.charge, payload_charge) }
         created_charges_ids.push(create_charge_result.charge.id)
       end
 
@@ -188,7 +183,7 @@ module Plans
       args_charges_ids = args_charges.map { |c| c[:id] }.compact
       charges_ids = plan.charges.pluck(:id) - args_charges_ids - created_charges_ids
       plan.charges.where(id: charges_ids).find_each do |charge|
-        cascade_charge_removal(charge)
+        after_commit { cascade_charge_removal(charge) }
         Charges::DestroyService.call(charge:)
       end
     end

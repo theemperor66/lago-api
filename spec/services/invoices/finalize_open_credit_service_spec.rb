@@ -16,7 +16,7 @@ RSpec.describe Invoices::FinalizeOpenCreditService, type: :service do
 
   describe ".call" do
     it "updates invoice status and enqueues necessary jobs" do
-      result = service.call
+      result = described_class.call(invoice:)
 
       expect(result.invoice.status).to eq("finalized")
       expect(result.invoice.issuing_date).to be_today
@@ -30,6 +30,7 @@ RSpec.describe Invoices::FinalizeOpenCreditService, type: :service do
         invoice_id: result.invoice.id,
         invoice_type: result.invoice.invoice_type
       })
+      expect(Utils::ActivityLog).to have_produced("invoice.paid_credit_added").with(invoice)
     end
 
     context "when invoice is already finalized" do

@@ -9,7 +9,7 @@ RSpec.describe Wallets::UpdateService, type: :service do
   let(:organization) { membership.organization }
   let(:customer) { create(:customer, organization:) }
   let(:subscription) { create(:subscription, customer:) }
-  let(:wallet) { create(:wallet, customer:) }
+  let(:wallet) { create(:wallet, customer:, allowed_fee_types: []) }
   let(:expiration_at) { (Time.current + 1.year).iso8601 }
 
   describe "#call" do
@@ -28,7 +28,7 @@ RSpec.describe Wallets::UpdateService, type: :service do
     end
 
     it "updates the wallet" do
-      result = update_service.call
+      result = described_class.call(wallet:, params:)
       expect(result).to be_success
 
       aggregate_failures do
@@ -37,6 +37,7 @@ RSpec.describe Wallets::UpdateService, type: :service do
         expect(result.wallet.invoice_requires_successful_payment).to eq(true)
 
         expect(SendWebhookJob).to have_been_enqueued.with("wallet.updated", Wallet)
+        expect(Utils::ActivityLog).to have_produced("wallet.updated").after_commit.with(wallet)
       end
     end
 
@@ -319,6 +320,134 @@ RSpec.describe Wallets::UpdateService, type: :service do
           expect(result.error.messages[:recurring_transaction_rules]).to eq(["invalid_recurring_rule"])
 
           expect(SendWebhookJob).not_to have_been_enqueued.with("wallet.updated", Wallet)
+        end
+      end
+    end
+
+    context "with limitations" do
+      let(:limitations) do
+        {
+          fee_types: %w[charge]
+        }
+      end
+      let(:params) do
+        {
+          id: wallet.id,
+          name: "new name",
+          applies_to: limitations
+        }
+      end
+
+      it "creates fee limitation" do
+        result = update_service.call
+
+        expect(result).to be_success
+        expect(result.wallet.reload.name).to eq(params[:name])
+        expect(result.wallet.reload.allowed_fee_types).to eq(limitations[:fee_types])
+        expect(SendWebhookJob).to have_been_enqueued.with("wallet.updated", Wallet)
+      end
+
+      context "when an empty array is sent as argument" do
+        let(:limitations) do
+          {
+            fee_types: []
+          }
+        end
+
+        it "removes fee limitations" do
+          result = update_service.call
+
+          expect(result).to be_success
+          expect(result.wallet.reload.name).to eq(params[:name])
+          expect(result.wallet.reload.allowed_fee_types).to eq(limitations[:fee_types])
+          expect(SendWebhookJob).to have_been_enqueued.with("wallet.updated", Wallet)
+        end
+      end
+
+      context "when fee type is invalid" do
+        let(:limitations) do
+          {
+            fee_types: %w[invalid]
+          }
+        end
+
+        it "returns an error" do
+          result = update_service.call
+
+          expect(result).not_to be_success
+          expect(result.error.messages[:allowed_fee_types]).to eq(["invalid_fee_types"])
+          expect(SendWebhookJob).not_to have_been_enqueued.with("wallet.updated", Wallet)
+        end
+      end
+
+      context "with new billable metric limitations" do
+        let(:billable_metric) { create(:billable_metric, organization:) }
+        let(:billable_metric_second) { create(:billable_metric, organization:) }
+        let(:wallet_target) { create(:wallet_target, wallet:, billable_metric:) }
+        let(:limitations) do
+          {
+            billable_metric_ids: [billable_metric.id, billable_metric_second.id]
+          }
+        end
+
+        before do
+          CurrentContext.source = "graphql"
+
+          billable_metric_second
+          wallet_target
+        end
+
+        it "creates new wallet target" do
+          expect { update_service.call }.to change(WalletTarget, :count).by(1)
+        end
+
+        context "with API context" do
+          let(:limitations) do
+            {
+              billable_metric_codes: [billable_metric.code, billable_metric_second.code]
+            }
+          end
+
+          before { CurrentContext.source = "api" }
+
+          it "creates new wallet target" do
+            expect { update_service.call }.to change(WalletTarget, :count).by(1)
+          end
+        end
+
+        context "with invalid billable metric" do
+          let(:limitations) do
+            {
+              billable_metric_ids: [billable_metric.id, billable_metric_second.id, "invalid"]
+            }
+          end
+
+          it "returns an error" do
+            result = update_service.call
+
+            expect(result).not_to be_success
+            expect(result.error.messages[:billable_metrics]).to eq(["invalid_identifier"])
+          end
+        end
+      end
+
+      context "with wallet targets to delete" do
+        let(:billable_metric) { create(:billable_metric, organization:) }
+        let(:wallet_target) { create(:wallet_target, wallet:, billable_metric:) }
+        let(:limitations) do
+          {
+            billable_metric_ids: []
+          }
+        end
+
+        before do
+          CurrentContext.source = "graphql"
+
+          wallet_target
+        end
+
+        it "deletes a wallet target" do
+          expect { update_service.call }.to change(WalletTarget, :count).by(-1)
         end
       end
     end

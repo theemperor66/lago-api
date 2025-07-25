@@ -6,12 +6,12 @@ require "factory_bot_rails"
 organization = Organization.find_or_create_by!(name: "Hooli")
 ApiKey.find_or_create_by!(organization:)
 
-webhook_endpoint = WebhookEndpoint.find_or_create_by!(organization:, webhook_url: "http://test.lago.dev/webhook")
+webhook_endpoint = WebhookEndpoint.find_or_create_by!(organization:, webhook_url: "http://webhook/11111111-2222-3333-4444-555555555555")
 
 3.times do
-  FactoryBot.create(:webhook, :succeeded, webhook_endpoint:)
-  FactoryBot.create(:webhook, :succeeded_with_retries, webhook_endpoint:)
-  FactoryBot.create(:webhook, :failed, webhook_endpoint:)
-  FactoryBot.create(:webhook, :failed_with_retries, webhook_endpoint:)
-  FactoryBot.create(:webhook, :pending, webhook_endpoint:)
+  FactoryBot.create(:webhook, :succeeded, organization:, webhook_endpoint:)
+  FactoryBot.create(:webhook, :succeeded_with_retries, organization:, webhook_endpoint:)
+  FactoryBot.create(:webhook, :failed, organization:, webhook_endpoint:)
+  FactoryBot.create(:webhook, :failed_with_retries, organization:, webhook_endpoint:)
+  FactoryBot.create(:webhook, :pending, organization:, webhook_endpoint:)
 end

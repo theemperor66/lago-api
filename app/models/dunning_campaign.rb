@@ -4,6 +4,7 @@ class DunningCampaign < ApplicationRecord
   include PaperTrailTraceable
   include Discard::Model
   self.discard_column = :deleted_at
+  self.ignored_columns += %w[applied_to_organization]
 
   ORDERS = %w[name code].freeze
 
@@ -11,6 +12,7 @@ class DunningCampaign < ApplicationRecord
 
   has_many :thresholds, class_name: "DunningCampaignThreshold", dependent: :destroy
   has_many :customers, foreign_key: :applied_dunning_campaign_id, dependent: :nullify
+  has_many :billing_entities, foreign_key: :applied_dunning_campaign_id
   has_many :payment_requests, dependent: :nullify
 
   accepts_nested_attributes_for :thresholds
@@ -42,8 +44,8 @@ class DunningCampaign < ApplicationRecord
       last_dunning_campaign_attempt_at: nil
     )
 
-    # NOTE: Reset last attempt on customers falling back to the organization campaign
-    organization.reset_customers_last_dunning_campaign_attempt if applied_to_organization?
+    # NOTE: Reset last attempt on customers falling back to the billing_entity campaign
+    billing_entities.includes(:customers).map(&:reset_customers_last_dunning_campaign_attempt)
   end
 end
 
@@ -51,18 +53,17 @@ end
 #
 # Table name: dunning_campaigns
 #
-#  id                      :uuid             not null, primary key
-#  applied_to_organization :boolean          default(FALSE), not null
-#  bcc_emails              :string           default([]), is an Array
-#  code                    :string           not null
-#  days_between_attempts   :integer          default(1), not null
-#  deleted_at              :datetime
-#  description             :text
-#  max_attempts            :integer          default(1), not null
-#  name                    :string           not null
-#  created_at              :datetime         not null
-#  updated_at              :datetime         not null
-#  organization_id         :uuid             not null
+#  id                    :uuid             not null, primary key
+#  bcc_emails            :string           default([]), is an Array
+#  code                  :string           not null
+#  days_between_attempts :integer          default(1), not null
+#  deleted_at            :datetime
+#  description           :text
+#  max_attempts          :integer          default(1), not null
+#  name                  :string           not null
+#  created_at            :datetime         not null
+#  updated_at            :datetime         not null
+#  organization_id       :uuid             not null
 #
 # Indexes
 #

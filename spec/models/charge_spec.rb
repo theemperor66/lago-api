@@ -7,8 +7,11 @@ RSpec.describe Charge, type: :model do
 
   it_behaves_like "paper_trail traceable"
 
-  it { is_expected.to belong_to(:organization).optional }
+  it { is_expected.to belong_to(:organization) }
   it { is_expected.to have_many(:filters).dependent(:destroy) }
+
+  it { is_expected.to have_one(:applied_pricing_unit) }
+  it { is_expected.to have_one(:pricing_unit).through(:applied_pricing_unit) }
 
   describe "#validate_graduated" do
     subject(:charge) do
@@ -547,6 +550,24 @@ RSpec.describe Charge, type: :model do
     end
   end
 
+  describe "#pricing_group_keys" do
+    subject(:charge) { build(:standard_charge, properties:) }
+
+    let(:properties) { {"amount_cents" => "1000", :pricing_group_keys => ["user_id"]} }
+
+    it "returns the pricing group keys" do
+      expect(charge.pricing_group_keys).to eq(["user_id"])
+    end
+
+    context "with grouped_by property" do
+      let(:properties) { {"amount_cents" => "1000", :grouped_by => ["user_id"]} }
+
+      it "returns the pricing group keys" do
+        expect(charge.pricing_group_keys).to eq(["user_id"])
+      end
+    end
+  end
+
   describe "#equal_properties?" do
     let(:charge1) { build(:standard_charge, properties: {amount: 100}) }
 
@@ -616,6 +637,99 @@ RSpec.describe Charge, type: :model do
 
     context "when subscription has no next subscription" do
       let(:next_subscriptions) { [] }
+
+      it "returns false" do
+        expect(subject).to be false
+      end
+    end
+  end
+
+  describe "validations" do
+    subject { charge.valid? }
+
+    describe "of charge model" do
+      let(:error) { charge.errors.where(:charge_model, :graduated_percentage_requires_premium_license) }
+      let(:charge) { build_stubbed(:charge, charge_model:, properties:) }
+      let(:properties) { attributes_for("#{charge_model}_charge")[:properties] }
+
+      context "when premium" do
+        around { |test| lago_premium!(&test) }
+
+        before { subject }
+
+        context "when charge model is graduated percentage" do
+          let(:charge_model) { :graduated_percentage }
+
+          it "does not add an error" do
+            expect(error).not_to be_present
+          end
+        end
+
+        context "when charge model is non graduated percentage" do
+          let(:charge_model) { described_class::CHARGE_MODELS.excluding(:graduated_percentage).sample }
+
+          it "does not add an error" do
+            expect(error).not_to be_present
+          end
+        end
+      end
+
+      context "when freemium" do
+        before { subject }
+
+        context "when charge model is graduated percentage" do
+          let(:charge_model) { :graduated_percentage }
+
+          it "adds an error" do
+            expect(error).to be_present
+          end
+        end
+
+        context "when charge model is non graduated percentage" do
+          let(:charge_model) { described_class::CHARGE_MODELS.excluding(:graduated_percentage).sample }
+
+          it "does not add an error" do
+            expect(error).not_to be_present
+          end
+        end
+      end
+    end
+  end
+
+  describe "#equal_applied_pricing_unit_rate?" do
+    subject { charge.equal_applied_pricing_unit_rate?(another_charge) }
+
+    let(:charge) { build(:standard_charge, applied_pricing_unit:) }
+
+    let(:another_charge) do
+      build(
+        :standard_charge,
+        applied_pricing_unit: build(:applied_pricing_unit)
+      )
+    end
+
+    context "when has associated applied pricing unit" do
+      let(:applied_pricing_unit) { build(:applied_pricing_unit, conversion_rate:) }
+
+      context "when charges conversion rate is equal" do
+        let(:conversion_rate) { another_charge.applied_pricing_unit.conversion_rate }
+
+        it "returns true" do
+          expect(subject).to be true
+        end
+      end
+
+      context "when charges conversion rate is not equal" do
+        let(:conversion_rate) { another_charge.applied_pricing_unit.conversion_rate - 0.5 }
+
+        it "returns false" do
+          expect(subject).to be false
+        end
+      end
+    end
+
+    context "when has no associated applied pricing unit" do
+      let(:applied_pricing_unit) { nil }
 
       it "returns false" do
         expect(subject).to be false

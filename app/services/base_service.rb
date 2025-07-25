@@ -3,6 +3,9 @@
 class BaseService
   include AfterCommitEverywhere
 
+  # rubocop:disable ThreadSafety/ClassAndModuleAttributes
+  class_attribute :activity_log_config, instance_writer: false, default: nil
+  # rubocop:enable ThreadSafety/ClassAndModuleAttributes
   class FailedResult < StandardError
     attr_reader :result, :original_error
 
@@ -14,7 +17,19 @@ class BaseService
     end
   end
 
-  class ThrottlingError < StandardError; end
+  class ThrottlingError < StandardError
+    attr_reader :provider_name
+
+    def initialize(provider_name: nil)
+      @provider_name = provider_name
+
+      super(message)
+    end
+
+    def message
+      "Service #{provider_name} is not available. Try again later."
+    end
+  end
 
   class NotFoundFailure < FailedResult
     attr_reader :resource
@@ -115,6 +130,17 @@ class BaseService
     end
   end
 
+  class TooManyProviderRequestsFailure < FailedResult
+    attr_reader :provider_name, :error
+
+    def initialize(result, provider_name:, error:)
+      @provider_name = provider_name
+      @error = error
+
+      super(result, error.message, original_error: error)
+    end
+  end
+
   # DEPRECATED: This is a legacy result class that should
   #             be replaced be defining a Result in every service, using the BaseResult
   class LegacyResult < OpenStruct
@@ -186,6 +212,10 @@ class BaseService
       fail_with_error!(ThirdPartyFailure.new(self, third_party:, error_code:, error_message:))
     end
 
+    def too_many_provider_requests_failure!(provider_name:, error:)
+      fail_with_error!(TooManyProviderRequestsFailure.new(self, provider_name:, error:))
+    end
+
     def raise_if_error!
       return self if success?
 
@@ -199,9 +229,19 @@ class BaseService
 
   Result = LegacyResult
 
+  def self.activity_loggable(action:, record:, condition: -> { true }, after_commit: true)
+    self.activity_log_config = {action:, record:, condition:, after_commit:}
+  end
+
   def self.call(*, **, &)
     LagoTracer.in_span("#{name}#call") do
-      new(*, **).call(&)
+      instance = new(*, **)
+
+      if instance.try(:produce_activity_log?)
+        instance.call_with_activity_log(&)
+      else
+        instance.call(&)
+      end
     end
   end
 
@@ -232,6 +272,29 @@ class BaseService
     raise NotImplementedError
   end
 
+  def produce_activity_log?
+    return false if activity_log_config.nil?
+
+    instance_exec(&self.class.activity_log_config[:condition])
+  end
+
+  def call_with_activity_log(&block)
+    action = self.class.activity_log_config[:action]
+    after_commit = self.class.activity_log_config[:after_commit]
+    kwargs = {after_commit:}.compact
+
+    case action
+    when /updated/
+      record = instance_exec(&self.class.activity_log_config[:record])
+      Utils::ActivityLog.produce(record, action, **kwargs) { call(&block) }
+    else
+      call(&block).tap do |result|
+        record = instance_exec(&self.class.activity_log_config[:record])
+        Utils::ActivityLog.produce(record, action, **kwargs) { result }
+      end
+    end
+  end
+
   protected
 
   attr_writer :result
@@ -248,7 +311,7 @@ class BaseService
     source&.to_sym == :graphql
   end
 
-  def at_time_zone(customer: "customers", organization: "organizations")
-    Utils::Timezone.at_time_zone_sql(customer:, organization:)
+  def at_time_zone(customer: "customers", billing_entity: "billing_entities")
+    Utils::Timezone.at_time_zone_sql(customer:, billing_entity:)
   end
 end

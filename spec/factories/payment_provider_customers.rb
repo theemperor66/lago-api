@@ -5,7 +5,7 @@ FactoryBot.define do
     customer
     organization { customer.organization }
 
-    provider_customer_id { SecureRandom.uuid }
+    provider_customer_id { "cus_#{SecureRandom.hex}" }
     provider_payment_methods { %w[card sepa_debit] }
   end
 
@@ -33,6 +33,13 @@ FactoryBot.define do
   factory :moneyhash_customer, class: "PaymentProviderCustomers::MoneyhashCustomer" do
     customer
     organization { customer.organization }
+
+    provider_customer_id { SecureRandom.uuid }
+  end
+  factory :flutterwave_customer, class: "PaymentProviderCustomers::FlutterwaveCustomer" do
+    customer
+    organization { customer.organization }
+    payment_provider { association(:flutterwave_provider, organization: organization) }
 
     provider_customer_id { SecureRandom.uuid }
   end

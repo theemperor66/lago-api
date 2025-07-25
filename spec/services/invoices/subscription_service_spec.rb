@@ -117,6 +117,12 @@ RSpec.describe Invoices::SubscriptionService, type: :service do
       end.to have_enqueued_job(SendWebhookJob).with("invoice.created", Invoice)
     end
 
+    it "produces an activity log" do
+      invoice = described_class.call(subscriptions:, timestamp: timestamp.to_i, invoicing_reason:).invoice
+
+      expect(Utils::ActivityLog).to have_produced("invoice.created").with(invoice)
+    end
+
     it "enqueues GeneratePdfAndNotifyJob with email false" do
       expect do
         invoice_service.call
@@ -229,6 +235,12 @@ RSpec.describe Invoices::SubscriptionService, type: :service do
         expect do
           invoice_service.call
         end.to have_enqueued_job(SendWebhookJob).with("invoice.drafted", Invoice)
+      end
+
+      it "produces an activity log" do
+        invoice = described_class.call(subscriptions:, timestamp: timestamp.to_i, invoicing_reason:).invoice
+
+        expect(Utils::ActivityLog).to have_produced("invoice.drafted").with(invoice)
       end
 
       it "does not flag lifetime usage for refresh" do

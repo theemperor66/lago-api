@@ -6,7 +6,7 @@ class AppliedCoupon < ApplicationRecord
 
   belongs_to :coupon
   belongs_to :customer
-  belongs_to :organization, optional: true
+  belongs_to :organization
 
   has_many :credits
 
@@ -37,7 +37,7 @@ class AppliedCoupon < ApplicationRecord
   def remaining_amount
     return @remaining_amount if defined?(@remaining_amount)
 
-    already_applied_amount = credits.sum(&:amount_cents)
+    already_applied_amount = credits.active.sum(&:amount_cents)
     @remaining_amount = amount_cents - already_applied_amount
   end
 end
@@ -59,7 +59,7 @@ end
 #  updated_at                   :datetime         not null
 #  coupon_id                    :uuid             not null
 #  customer_id                  :uuid             not null
-#  organization_id              :uuid
+#  organization_id              :uuid             not null
 #
 # Indexes
 #

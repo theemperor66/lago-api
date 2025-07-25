@@ -64,7 +64,7 @@ module Api
           organization_id: current_organization.id
         )
 
-        result = Subscriptions::CreateService.call(
+        result = ::Subscriptions::CreateService.call(
           customer:,
           plan:,
           params: create_params.to_h
@@ -90,7 +90,9 @@ module Api
           query.active
         end.first
 
-        result = Subscriptions::TerminateService.call(subscription:)
+        kwargs = params.permit(:on_termination_credit_note, :on_termination_invoice).to_h.symbolize_keys
+
+        result = ::Subscriptions::TerminateService.call(subscription:, **kwargs)
 
         if result.success?
           render_subscription(result.subscription)
@@ -113,7 +115,7 @@ module Api
           query
         end.first
 
-        result = Subscriptions::UpdateService.call(
+        result = ::Subscriptions::UpdateService.call(
           subscription:,
           params: update_params.to_h
         )
@@ -126,10 +128,12 @@ module Api
       end
 
       def show
-        subscription = current_organization.subscriptions.find_by(
-          external_id: params[:external_id],
-          status: params[:status] || :active
-        )
+        subscription = current_organization.subscriptions
+          .order("terminated_at DESC NULLS FIRST, started_at DESC")
+          .find_by(
+            external_id: params[:external_id],
+            status: params[:status] || :active
+          )
         return not_found_error(resource: "subscription") unless subscription
 
         render_subscription(subscription)
@@ -182,6 +186,8 @@ module Api
           :subscription_date,
           :subscription_at,
           :ending_at,
+          :on_termination_credit_note,
+          :on_termination_invoice,
           plan_overrides:
         )
       end
@@ -218,7 +224,13 @@ module Api
                   }
                 ]
               },
-              {tax_codes: []}
+              {tax_codes: []},
+              {
+                applied_pricing_unit: [
+                  :code,
+                  :conversion_rate
+                ]
+              }
             ],
             usage_thresholds: [
               :id,
@@ -231,7 +243,9 @@ module Api
       end
 
       def index_filters
-        params.permit(:external_customer_id, :plan_code, status: [])
+        filters = params.permit(:external_customer_id, :plan_code, status: [])
+        filters[:status] = ["active"] if filters[:status].blank?
+        filters
       end
 
       def render_subscription(subscription)

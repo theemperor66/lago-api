@@ -20,10 +20,11 @@ module CreditNotes
         stripe_result = create_stripe_refund
 
         refund = Refund.new(
+          organization_id: credit_note.organization_id,
           credit_note:,
           payment:,
           payment_provider: payment.payment_provider,
-          payment_provider_customer: payment.payment_provider_customer,
+          payment_provider_customer: payment_provider_customer(customer),
           amount_cents: stripe_result.amount,
           amount_currency: stripe_result.currency&.upcase,
           status: stripe_result.status,
@@ -39,6 +40,7 @@ module CreditNotes
       rescue ::Stripe::InvalidRequestError => e
         deliver_error_webhook(message: e.message, code: e.code)
         update_credit_note_status(:failed)
+        Utils::ActivityLog.produce(credit_note, "credit_note.refund_failure")
         return result if e.code == INVALID_PAYMENT_METHOD_ERROR
 
         result.service_failure!(code: "stripe_error", message: e.message)
@@ -58,6 +60,7 @@ module CreditNotes
 
         if status.to_sym == :failed
           deliver_error_webhook(message: "Payment refund failed", code: nil)
+          Utils::ActivityLog.produce(credit_note, "credit_note.refund_failure")
           result.service_failure!(code: "refund_failed", message: "Refund failed to perform")
         end
 
@@ -138,7 +141,7 @@ module CreditNotes
         SendWebhookJob.perform_later(
           "credit_note.provider_refund_failure",
           credit_note,
-          provider_customer_id: customer.stripe_customer.provider_customer_id,
+          provider_customer_id: payment_provider_customer(customer)&.provider_customer_id,
           provider_error: {
             message:,
             error_code: code

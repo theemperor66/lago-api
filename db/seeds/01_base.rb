@@ -42,7 +42,48 @@ plan = Plan.create_with(
   code: "standard_plan"
 )
 
+# Tax
+if !Tax.exists?(organization:, code: "lago_eu_fr_standard")
+  Taxes::CreateService.call!(
+    organization:,
+    params: {
+      name: "Lago EU FR Standard",
+      code: "lago_eu_fr_standard",
+      description: "Lago EU FR Standard",
+      rate: 20
+    }
+  )
+end
+
+# Pay-in-advance plan
+if !Plan.exists?(organization:, code: "pay_in_advance_plan")
+  Plans::CreateService.call!(
+    organization_id: organization.id,
+    name: "Pay-in-advance Plan",
+    code: "pay_in_advance_plan",
+    interval: "monthly",
+    pay_in_advance: true,
+    amount_cents: 10000,
+    amount_currency: "EUR",
+    tax_codes: ["lago_eu_fr_standard"]
+  )
+end
+
+# Add-on
+if !AddOn.exists?(organization:, code: "setup_fee")
+  AddOns::CreateService.call!(
+    organization_id: organization.id,
+    name: "Setup Fee",
+    code: "setup_fee",
+    description: "Fee for setting up the subscription",
+    amount_cents: 10000,
+    amount_currency: "EUR",
+    tax_codes: ["lago_eu_fr_standard"]
+  )
+end
+
 Charge.create_with(
+  organization:,
   charge_model: "standard",
   amount_currency: "EUR",
   properties: {
@@ -54,6 +95,7 @@ Charge.create_with(
 )
 
 Charge.create_with(
+  organization:,
   charge_model: "standard",
   amount_currency: "EUR",
   properties: {
@@ -90,6 +132,7 @@ Charge.create_with(
   subscription_at = (Time.current - 6.months).beginning_of_month
 
   sub = Subscription.create_with(
+    organization:,
     started_at: subscription_at,
     subscription_at:,
     status: :active,

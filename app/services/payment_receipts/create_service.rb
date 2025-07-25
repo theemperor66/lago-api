@@ -25,6 +25,7 @@ module PaymentReceipts
       result.payment_receipt = PaymentReceipt.create!(payment:, organization:, billing_entity:)
 
       SendWebhookJob.perform_later("payment_receipt.created", result.payment_receipt)
+      Utils::ActivityLog.produce(result.payment_receipt, "payment_receipt.created")
       GeneratePdfAndNotifyJob.perform_later(payment_receipt: result.payment_receipt, email: should_deliver_email?)
 
       result

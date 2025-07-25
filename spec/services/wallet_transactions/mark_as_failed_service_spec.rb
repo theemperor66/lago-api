@@ -27,6 +27,12 @@ RSpec.describe WalletTransactions::MarkAsFailedService, type: :service do
       it "does not enqueue a SendWebhookJob" do
         expect { service.call }.not_to have_enqueued_job(SendWebhookJob)
       end
+
+      it "produces an activity log" do
+        described_class.call(wallet_transaction:)
+
+        expect(Utils::ActivityLog).to have_produced("wallet_transaction.updated").after_commit.with(wallet_transaction)
+      end
     end
 
     context "when wallet_transaction is not failed" do
@@ -40,6 +46,21 @@ RSpec.describe WalletTransactions::MarkAsFailedService, type: :service do
         expect {
           service.call
         }.to have_enqueued_job(SendWebhookJob).with("wallet_transaction.updated", wallet_transaction)
+      end
+
+      context "when the wallet_transaction is settled" do
+        let(:wallet) { create(:wallet, credits_balance: 100, balance_cents: 100) }
+        let(:wallet_transaction) { create(:wallet_transaction, wallet:, status: "settled", amount: 100, credit_amount: 100) }
+
+        before do
+          wallet_transaction
+        end
+
+        it "does not do anything" do
+          expect {
+            service.call
+          }.not_to change(wallet_transaction, :status)
+        end
       end
     end
   end

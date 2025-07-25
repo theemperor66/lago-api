@@ -21,16 +21,32 @@ class BillingEntity < ApplicationRecord
   has_many :fees
   has_many :invoices
   has_many :payment_receipts
-  has_many :invoice_custom_section_selections, dependent: :destroy
+
+  has_many :applied_invoice_custom_sections,
+    class_name: "BillingEntity::AppliedInvoiceCustomSection",
+    dependent: :destroy
+  has_many :selected_invoice_custom_sections,
+    through: :applied_invoice_custom_sections,
+    source: :invoice_custom_section
+  has_many :manual_selected_invoice_custom_sections,
+    -> { where(section_type: :manual) },
+    through: :applied_invoice_custom_sections,
+    source: :invoice_custom_section
+  has_many :system_generated_selected_invoice_custom_sections,
+    -> { where(section_type: :system_generated) },
+    through: :applied_invoice_custom_sections,
+    source: :invoice_custom_section
 
   has_many :credit_notes, through: :invoices
-  has_many :selected_invoice_custom_sections, through: :invoice_custom_section_selections, source: :invoice_custom_section
   has_many :subscriptions, through: :customers
   has_many :taxes, through: :applied_taxes
   has_many :wallets, through: :customers
   has_many :wallet_transactions, through: :wallets
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    as: :resource
 
   belongs_to :applied_dunning_campaign, class_name: "DunningCampaign", optional: true
 
@@ -104,6 +120,15 @@ class BillingEntity < ApplicationRecord
     ENV["LAGO_FROM_EMAIL"]
   end
 
+  def reset_customers_last_dunning_campaign_attempt
+    customers
+      .falling_back_to_default_dunning_campaign
+      .update_all( # rubocop:disable Rails/SkipsModelValidations
+        last_dunning_campaign_attempt: 0,
+        last_dunning_campaign_attempt_at: nil
+      )
+  end
+
   private
 
   def generate_document_number_prefix
@@ -162,5 +187,6 @@ end
 #
 # Foreign Keys
 #
+#  fk_rails_...  (applied_dunning_campaign_id => dunning_campaigns.id) ON DELETE => nullify
 #  fk_rails_...  (organization_id => organizations.id)
 #

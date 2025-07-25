@@ -3,6 +3,8 @@
 module BillableMetrics
   module Aggregations
     class BaseService < ::BaseService
+      PerEventAggregationResult = BaseResult[:event_aggregation]
+
       def initialize(event_store_class:, charge:, subscription:, boundaries:, filters: {}, bypass_aggregation: false)
         super(nil)
         @event_store_class = event_store_class
@@ -29,7 +31,7 @@ module BillableMetrics
             compute_grouped_by_precise_total_amount_cents(options:)
           end
 
-          result.aggregations.each { apply_rounding(_1) }
+          result.aggregations.each { apply_rounding(it) }
         else
           compute_aggregation(options:)
           if charge.dynamic?
@@ -57,9 +59,11 @@ module BillableMetrics
         raise NotImplementedError
       end
 
-      def per_event_aggregation(exclude_event: false)
-        Result.new.tap do |result|
-          result.event_aggregation = compute_per_event_aggregation(exclude_event:)
+      def per_event_aggregation(exclude_event: false, grouped_by_values: nil)
+        PerEventAggregationResult.new.tap do |result|
+          result.event_aggregation = event_store.with_grouped_by_values(grouped_by_values) do
+            compute_per_event_aggregation(exclude_event:)
+          end
         end
       end
 
@@ -140,6 +144,7 @@ module BillableMetrics
         empty_result.aggregation = 0
         empty_result.count = 0
         empty_result.current_usage_units = 0
+        empty_result.options = {running_total: []}
 
         result.aggregations = [empty_result]
         result

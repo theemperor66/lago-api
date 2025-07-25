@@ -109,6 +109,13 @@ RSpec.describe CreditNotes::Refunds::AdyenService, type: :service do
             }
           )
       end
+
+      it "produces an activity log" do
+        expect { adyen_service.create }
+          .to raise_error(Adyen::AdyenError)
+
+        expect(Utils::ActivityLog).to have_produced("credit_note.refund_failure").with(credit_note)
+      end
     end
 
     context "when credit note does not have a refund amount" do
@@ -165,6 +172,32 @@ RSpec.describe CreditNotes::Refunds::AdyenService, type: :service do
           expect(result.refund).to be_nil
 
           expect(modifications_api).not_to have_received(:refund_captured_payment)
+        end
+      end
+    end
+
+    context "when payment provider customer was discarded" do
+      before { adyen_customer.discard }
+
+      it "creates a adyen refund and a refund" do
+        result = adyen_service.create
+
+        aggregate_failures do
+          expect(result).to be_success
+
+          expect(result.refund.id).to be_present
+
+          expect(result.refund.credit_note).to eq(credit_note)
+          expect(result.refund.payment).to eq(payment)
+          expect(result.refund.payment_provider).to eq(adyen_payment_provider)
+          expect(result.refund.payment_provider_customer).to eq(adyen_customer)
+          expect(result.refund.amount_cents).to eq(134)
+          expect(result.refund.amount_currency).to eq("CHF")
+          expect(result.refund.status).to eq("pending")
+          expect(result.refund.provider_refund_id).to eq(refunds_response.response["pspReference"])
+
+          expect(result.credit_note).not_to be_succeeded
+          expect(result.credit_note.refunded_at).not_to be_present
         end
       end
     end
@@ -278,7 +311,9 @@ RSpec.describe CreditNotes::Refunds::AdyenService, type: :service do
     end
 
     context "when status is failed" do
-      before { adyen_customer }
+      before do
+        adyen_customer
+      end
 
       it "delivers an error webhook" do
         result = adyen_service.update_status(
@@ -304,6 +339,15 @@ RSpec.describe CreditNotes::Refunds::AdyenService, type: :service do
               }
             )
         end
+      end
+
+      it "produces an activity log" do
+        adyen_service.update_status(
+          provider_refund_id: refund.provider_refund_id,
+          status: "failed"
+        )
+
+        expect(Utils::ActivityLog).to have_produced("credit_note.refund_failure").with(credit_note)
       end
     end
   end

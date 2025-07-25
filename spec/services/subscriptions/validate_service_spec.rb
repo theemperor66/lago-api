@@ -18,9 +18,14 @@ RSpec.describe Subscriptions::ValidateService, type: :service do
       customer:,
       plan:,
       subscription_at:,
-      ending_at:
+      ending_at:,
+      on_termination_credit_note:,
+      on_termination_invoice:
     }
   end
+
+  let(:on_termination_credit_note) { nil }
+  let(:on_termination_invoice) { nil }
 
   describe "#ending_at" do
     subject(:method_call) { validate_service.__send__(:ending_at) }
@@ -139,6 +144,48 @@ RSpec.describe Subscriptions::ValidateService, type: :service do
           expect(validate_service).not_to be_valid
           expect(result.error.messages[:ending_at]).to eq(["invalid_date"])
         end
+      end
+    end
+
+    context "with invalid on_termination_credit_note" do
+      let(:on_termination_credit_note) { "invalid" }
+
+      it "returns false and result has errors" do
+        expect(validate_service).not_to be_valid
+        expect(result.error.messages[:on_termination_credit_note]).to eq(["invalid_value"])
+      end
+    end
+
+    context "with valid on_termination_credit_note" do
+      let(:on_termination_credit_note) { "credit" }
+
+      it "returns true" do
+        expect(validate_service).to be_valid
+      end
+    end
+
+    context "with invalid on_termination_invoice" do
+      let(:on_termination_invoice) { "invalid" }
+
+      it "returns false and result has errors" do
+        expect(validate_service).not_to be_valid
+        expect(result.error.messages[:on_termination_invoice]).to eq(["invalid_value"])
+      end
+    end
+
+    context "with valid on_termination_invoice" do
+      let(:on_termination_invoice) { "generate" }
+
+      it "returns true" do
+        expect(validate_service).to be_valid
+      end
+    end
+
+    context "with valid on_termination_invoice skip" do
+      let(:on_termination_invoice) { "skip" }
+
+      it "returns true" do
+        expect(validate_service).to be_valid
       end
     end
   end

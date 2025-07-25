@@ -11,6 +11,7 @@ module PaymentProviders
       setup_intent.succeeded
       payment_intent.payment_failed
       payment_intent.succeeded
+      payment_intent.canceled
       payment_method.detached
       charge.refund.updated
       customer.updated
@@ -25,6 +26,7 @@ module PaymentProviders
     ].freeze
     SUCCESS_STATUSES = %w[succeeded].freeze
     FAILED_STATUSES = %w[canceled requires_payment_method].freeze
+    SUPPORTED_EU_BANK_TRANSFER_COUNTRIES = %w[BE DE ES FR IE NL].freeze
 
     validates :secret_key, presence: true
     validates :success_redirect_url, url: true, allow_nil: true, length: {maximum: 1024}

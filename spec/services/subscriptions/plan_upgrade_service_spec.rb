@@ -49,12 +49,17 @@ RSpec.describe Subscriptions::PlanUpgradeService, type: :service do
       expect(SendWebhookJob).to have_been_enqueued.with("subscription.started", result.subscription)
     end
 
+    it "produces an activity log" do
+      result
+      expect(Utils::ActivityLog).to have_produced("subscription.started").with(result.subscription)
+    end
+
     it "enqueues the Hubspot update job" do
       # TODO: review this one, this one should fail because the code conditional
       # is not meet by the test setup...
       # The subscription does not start in the future
       result
-      expect(Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob).to have_been_enqueued.with(subscription:)
+      expect(Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob).to have_been_enqueued.twice.with(subscription:)
     end
 
     it "creates a new subscription" do

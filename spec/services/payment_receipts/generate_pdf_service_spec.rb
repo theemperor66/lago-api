@@ -34,6 +34,12 @@ RSpec.describe PaymentReceipts::GeneratePdfService, type: :service do
       expect { payment_receipt_generate_service.call }.to have_enqueued_job(SendWebhookJob)
     end
 
+    it "produces an activity log" do
+      receipt = described_class.call(payment_receipt:, context:).payment_receipt
+
+      expect(Utils::ActivityLog).to have_produced("payment_receipt.generated").with(receipt)
+    end
+
     context "with not found payment receipt" do
       let(:payment_receipt) { nil }
 
@@ -42,6 +48,18 @@ RSpec.describe PaymentReceipts::GeneratePdfService, type: :service do
 
         expect(result.success).to be_falsey
         expect(result.error.error_code).to eq("payment_receipt_not_found")
+      end
+    end
+
+    context "when related to a progressive billing invoice" do
+      let(:invoice) do
+        create(:invoice, :progressive_billing_invoice, customer:, status: :finalized, organization:)
+      end
+
+      it "successfully generates the payment receipt" do
+        result = payment_receipt_generate_service.call
+
+        expect(result.payment_receipt.file).to be_present
       end
     end
 

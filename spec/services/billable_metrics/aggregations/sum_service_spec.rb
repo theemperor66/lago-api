@@ -761,6 +761,20 @@ RSpec.describe BillableMetrics::Aggregations::SumService, type: :service, transa
 
       expect(result.event_aggregation).to eq([12, 12, 12, 12])
     end
+
+    context "with grouped_by_values" do
+      let(:event) { latest_events.first }
+
+      before do
+        event.update!(properties: event.properties.merge(scheme: "visa"))
+      end
+
+      it "takes the groups into account" do
+        result = sum_service.per_event_aggregation(grouped_by_values: {"scheme" => "visa"})
+
+        expect(result.event_aggregation).to eq([12])
+      end
+    end
   end
 
   describe ".grouped_by aggregation" do
@@ -796,6 +810,7 @@ RSpec.describe BillableMetrics::Aggregations::SumService, type: :service, transa
         expect(aggregation.aggregation).to eq(12)
         expect(aggregation.count).to eq(1)
         expect(aggregation.grouped_by["agent_name"]).to eq(agent_names[index])
+        expect(aggregation.options[:running_total]).to eq([12])
       end
     end
 
@@ -916,6 +931,18 @@ RSpec.describe BillableMetrics::Aggregations::SumService, type: :service, transa
           end
           expect(aggregation.count).to eq(1)
           expect(aggregation.grouped_by["agent_name"]).to eq(agent_names[index])
+        end
+      end
+    end
+
+    context "with free units per events" do
+      it "returns a result with free units" do
+        result = sum_service.aggregate(options: {free_units_per_events: 10})
+
+        expect(result.aggregations.count).to eq(4)
+
+        result.aggregations.each_with_index do |aggregation, index|
+          expect(aggregation.options[:running_total]).to eq([12])
         end
       end
     end

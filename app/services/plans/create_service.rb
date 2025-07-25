@@ -7,6 +7,11 @@ module Plans
       super
     end
 
+    activity_loggable(
+      action: "plan.created",
+      record: -> { result.plan }
+    )
+
     def call
       plan = Plan.new(
         organization_id: args[:organization_id],
@@ -72,6 +77,7 @@ module Plans
 
       result.plan = plan
       track_plan_created(plan)
+      SendWebhookJob.perform_after_commit("plan.created", plan)
       result
     rescue ActiveRecord::RecordInvalid => e
       result.record_validation_failure!(record: e.record)
@@ -109,12 +115,12 @@ module Plans
         organization_id: plan.organization_id,
         billable_metric_id: args[:billable_metric_id],
         invoice_display_name: args[:invoice_display_name],
-        charge_model: charge_model(args),
+        charge_model: args[:charge_model],
         pay_in_advance: args[:pay_in_advance] || false,
         prorated: args[:prorated] || false
       )
 
-      properties = args[:properties].presence || Charges::BuildDefaultPropertiesService.call(charge_model(args))
+      properties = args[:properties].presence || Charges::BuildDefaultPropertiesService.call(args[:charge_model])
       charge.properties = Charges::FilterChargeModelPropertiesService.call(
         charge:,
         properties:
@@ -135,14 +141,10 @@ module Plans
       end
 
       charge.save!
+
+      AppliedPricingUnits::CreateService.call!(charge:, params: args[:applied_pricing_unit])
+
       charge
-    end
-
-    def charge_model(args)
-      model = args[:charge_model]&.to_sym
-      return if model == :graduated_percentage && !License.premium?
-
-      model
     end
 
     def track_plan_created(plan)

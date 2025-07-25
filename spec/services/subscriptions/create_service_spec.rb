@@ -64,6 +64,12 @@ RSpec.describe Subscriptions::CreateService, type: :service do
       end
     end
 
+    it "produces an activity log" do
+      subscription = create_service.call.subscription
+
+      expect(Utils::ActivityLog).to have_produced("subscription.started").with(subscription)
+    end
+
     context "when ending_at is passed" do
       let(:params) do
         {
@@ -455,7 +461,7 @@ RSpec.describe Subscriptions::CreateService, type: :service do
 
           it "enqueues the Hubspot update job", :aggregate_failures do
             create_service.call
-            expect(Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob).to have_been_enqueued.with(subscription:)
+            expect(Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob).to have_been_enqueued.twice.with(subscription:)
           end
 
           it "creates a new subscription" do
@@ -649,6 +655,11 @@ RSpec.describe Subscriptions::CreateService, type: :service do
           it "sends updated subscription webhook" do
             create_service.call
             expect(SendWebhookJob).to have_been_enqueued.with("subscription.updated", subscription)
+          end
+
+          it "produces an activity log" do
+            create_service.call
+            expect(Utils::ActivityLog).to have_produced("subscription.updated").with(subscription)
           end
 
           it "keeps the current subscription" do

@@ -16,6 +16,7 @@ module Invoices
       if should_generate_pdf?
         generate_pdf
         SendWebhookJob.perform_later("invoice.generated", invoice)
+        Utils::ActivityLog.produce(invoice, "invoice.generated")
       end
 
       result.invoice = invoice

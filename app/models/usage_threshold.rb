@@ -6,7 +6,7 @@ class UsageThreshold < ApplicationRecord
   include Discard::Model
   self.discard_column = :deleted_at
 
-  belongs_to :organization, optional: true
+  belongs_to :organization
   belongs_to :plan
 
   has_many :applied_usage_thresholds
@@ -39,7 +39,7 @@ end
 #  threshold_display_name :string
 #  created_at             :datetime         not null
 #  updated_at             :datetime         not null
-#  organization_id        :uuid
+#  organization_id        :uuid             not null
 #  plan_id                :uuid             not null
 #
 # Indexes

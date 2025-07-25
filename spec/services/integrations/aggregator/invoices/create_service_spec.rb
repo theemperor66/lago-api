@@ -150,7 +150,8 @@ RSpec.describe Integrations::Aggregator::Invoices::CreateService do
         "custbody_ava_disable_tax_calculation" => true,
         "custbody_lago_invoice_link" => invoice_url,
         "trandate" => anything,
-        "duedate" => due_date
+        "duedate" => due_date,
+        "lago_plan_codes" => invoice.invoice_subscriptions.map(&:subscription).map(&:plan).map(&:code).join(",")
       },
       "lines" => [
         {
@@ -223,7 +224,9 @@ RSpec.describe Integrations::Aggregator::Invoices::CreateService do
   end
 
   before do
-    allow(LagoHttpClient::Client).to receive(:new).with(endpoint).and_return(lago_client)
+    allow(LagoHttpClient::Client).to receive(:new)
+      .with(endpoint, retries_on: [OpenSSL::SSL::SSLError])
+      .and_return(lago_client)
 
     integration_customer
     charge

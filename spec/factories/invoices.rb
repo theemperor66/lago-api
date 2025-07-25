@@ -4,7 +4,7 @@ FactoryBot.define do
   factory :invoice do
     customer
     # TODO: change building invoices from billing_entity by default
-    organization
+    organization { customer&.organization || association(:organization) }
 
     issuing_date { Time.zone.now - 1.day }
     payment_due_date { issuing_date }
@@ -48,17 +48,21 @@ FactoryBot.define do
       status { :pending }
     end
 
-    trait :subscription do
+    trait :with_subscriptions do
       transient do
         subscriptions { [create(:subscription)] }
       end
 
-      invoice_type { :subscription }
       after :create do |invoice, evaluator|
         evaluator.subscriptions.each do |subscription|
           create(:invoice_subscription, :boundaries, invoice:, subscription:)
         end
       end
+    end
+
+    trait :subscription do
+      invoice_type { :subscription }
+      with_subscriptions
     end
 
     trait :self_billed do
@@ -67,6 +71,14 @@ FactoryBot.define do
 
     trait :invisible do
       status { Invoice::INVISIBLE_STATUS.keys.sample }
+    end
+
+    trait :progressive_billing_invoice do
+      invoice_type { :progressive_billing }
+      with_subscriptions
+      after :create do |invoice|
+        create(:applied_usage_threshold, invoice:, organization: invoice.organization)
+      end
     end
   end
 end

@@ -48,7 +48,7 @@ module Invoices
         Credits::AppliedCouponsService.call(invoice:) if should_create_coupon_credit?
 
         totals_result = Invoices::ComputeTaxesAndTotalsService.call(invoice:, finalizing: finalizing_invoice?)
-        return totals_result if !totals_result.success? && totals_result.error.is_a?(BaseService::UnknownTaxFailure)
+        return totals_result if !totals_result.success? && totals_result.error.is_a?(BaseService::UnknownTaxFailure) # rubocop:disable Rails/TransactionExitStatement
 
         totals_result.raise_if_error!
 
@@ -178,7 +178,7 @@ module Invoices
           subscription:,
           context: :recurring,
           boundaries:,
-          apply_taxes: invoice.customer.anrok_customer.blank?
+          apply_taxes: invoice.customer.tax_customer.blank?
         )
 
         result.non_invoiceable_fees.concat(fee_result.fees)
@@ -200,7 +200,7 @@ module Invoices
         (
           subscription.terminated? &&
           (
-            subscription.plan.pay_in_arrear? ||
+            subscription.plan.pay_in_arrears? ||
             subscription.terminated_at >= invoice.created_at ||
             calculate_true_up_fee_result.amount_cents.positive?
           )
@@ -224,7 +224,7 @@ module Invoices
       #       fee if the plan is in pay in arrears, otherwise this fee will never
       #       be created.
       subscription.active? ||
-        (subscription.terminated? && subscription.plan.pay_in_arrear?) ||
+        (subscription.terminated? && subscription.plan.pay_in_arrears?) ||
         (subscription.terminated? && subscription.terminated_at > invoice.created_at)
     end
 
@@ -245,7 +245,7 @@ module Invoices
         return !date_service(subscription).first_month_in_first_yearly_period? && date_service(subscription).first_month_in_yearly_period?
       end
 
-      if subscription.plan.pay_in_arrear?
+      if subscription.plan.pay_in_arrears?
         return subscription.terminated? || date_service(subscription).first_month_in_yearly_period?
       end
 

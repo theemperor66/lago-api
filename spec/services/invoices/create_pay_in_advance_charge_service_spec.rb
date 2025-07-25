@@ -156,6 +156,12 @@ RSpec.describe Invoices::CreatePayInAdvanceChargeService, type: :service do
       end.to have_enqueued_job(SendWebhookJob).with("fee.created", Fee)
     end
 
+    it "produces an activity log" do
+      invoice = described_class.call(charge:, event:, timestamp: timestamp.to_i).invoice
+
+      expect(Utils::ActivityLog).to have_produced("invoice.created").with(invoice)
+    end
+
     it "enqueues GeneratePdfAndNotifyJob with email false" do
       expect do
         invoice_service.call
@@ -217,7 +223,9 @@ RSpec.describe Invoices::CreatePayInAdvanceChargeService, type: :service do
         integration_collection_mapping
         integration_customer
 
-        allow(LagoHttpClient::Client).to receive(:new).with(endpoint).and_return(lago_client)
+        allow(LagoHttpClient::Client).to receive(:new)
+          .with(endpoint, retries_on: [OpenSSL::SSL::SSLError])
+          .and_return(lago_client)
         allow(lago_client).to receive(:post_with_response).and_return(response)
         allow(response).to receive(:body).and_return(body)
         allow_any_instance_of(Fee).to receive(:id).and_return("lago_fee_id") # rubocop:disable RSpec/AnyInstance
@@ -246,7 +254,7 @@ RSpec.describe Invoices::CreatePayInAdvanceChargeService, type: :service do
         end
 
         it "returns tax error" do
-          result = invoice_service.call
+          result = described_class.call(charge:, event:, timestamp: timestamp.to_i)
 
           aggregate_failures do
             expect(result).not_to be_success
@@ -258,6 +266,7 @@ RSpec.describe Invoices::CreatePayInAdvanceChargeService, type: :service do
             expect(invoice.status).to eq("failed")
             expect(invoice.error_details.count).to eq(1)
             expect(invoice.error_details.first.details["tax_error"]).to eq("taxDateTooFarInFuture")
+            expect(Utils::ActivityLog).to have_produced("invoice.failed").with(invoice)
           end
         end
       end

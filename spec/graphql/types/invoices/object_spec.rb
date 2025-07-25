@@ -53,6 +53,7 @@ RSpec.describe Types::Invoices::Object do
     expect(subject).to have_field(:file_url).of_type("String")
     expect(subject).to have_field(:metadata).of_type("[InvoiceMetadata!]")
 
+    expect(subject).to have_field(:activity_logs).of_type("[ActivityLog!]")
     expect(subject).to have_field(:applied_taxes).of_type("[InvoiceAppliedTax!]")
     expect(subject).to have_field(:credit_notes).of_type("[CreditNote!]")
     expect(subject).to have_field(:fees).of_type("[Fee!]")
@@ -66,5 +67,7 @@ RSpec.describe Types::Invoices::Object do
     expect(subject).to have_field(:integration_salesforce_syncable).of_type("Boolean!")
     expect(subject).to have_field(:integration_syncable).of_type("Boolean!")
     expect(subject).to have_field(:payments).of_type("[Payment!]")
+
+    expect(subject).to have_field(:tax_provider_id).of_type("String")
   end
 end

@@ -12,36 +12,51 @@ RSpec.describe Organization, type: :model do
     )
   end
 
-  it { is_expected.to have_many(:stripe_payment_providers) }
-  it { is_expected.to have_many(:gocardless_payment_providers) }
-  it { is_expected.to have_many(:adyen_payment_providers) }
+  describe "associations" do
+    it do
+      expect(subject).to have_many(:stripe_payment_providers)
+      expect(subject).to have_many(:gocardless_payment_providers)
+      expect(subject).to have_many(:adyen_payment_providers)
+
+      expect(subject).to have_many(:api_keys)
+      expect(subject).to have_many(:billing_entities).conditions(archived_at: nil)
+      expect(subject).to have_many(:all_billing_entities).class_name("BillingEntity")
+      expect(subject).to have_many(:pricing_units)
+      expect(subject).to have_many(:customers)
+      expect(subject).to have_many(:subscriptions)
+      expect(subject).to have_many(:credit_notes)
+      expect(subject).to have_many(:invoices)
+      expect(subject).to have_many(:fees)
+      expect(subject).to have_many(:applied_coupons)
+      expect(subject).to have_many(:wallets)
+      expect(subject).to have_many(:wallet_transactions)
+      expect(subject).to have_one(:default_billing_entity).class_name("BillingEntity")
+      expect(subject).to have_many(:webhook_endpoints)
+      expect(subject).to have_many(:webhooks)
+      expect(subject).to have_many(:hubspot_integrations)
+      expect(subject).to have_many(:netsuite_integrations)
+      expect(subject).to have_many(:xero_integrations)
+      expect(subject).to have_one(:salesforce_integration)
+      expect(subject).to have_many(:data_exports)
+      expect(subject).to have_many(:dunning_campaigns)
+      expect(subject).to have_many(:daily_usages)
+      expect(subject).to have_many(:invoice_custom_sections)
+      expect(subject).to have_many(:manual_invoice_custom_sections).conditions(section_type: "manual")
+      expect(subject).to have_many(:system_generated_invoice_custom_sections).conditions(section_type: "system_generated")
+
+      expect(subject).to have_many(:features).class_name("Entitlement::Feature")
+      expect(subject).to have_many(:privileges).class_name("Entitlement::Privilege")
+      expect(subject).to have_many(:entitlements).class_name("Entitlement::Entitlement")
+      expect(subject).to have_many(:entitlement_values).class_name("Entitlement::EntitlementValue")
+      expect(subject).to have_many(:subscription_feature_removals).class_name("Entitlement::SubscriptionFeatureRemoval")
+
+      expect(subject).to have_one(:applied_dunning_campaign).conditions(applied_to_organization: true)
+    end
+  end
 
   describe "Clickhouse associations", clickhouse: true do
     it { is_expected.to have_many(:activity_logs).class_name("Clickhouse::ActivityLog") }
   end
-
-  it { is_expected.to have_many(:api_keys) }
-  it { is_expected.to have_many(:billing_entities).conditions(archived_at: nil) }
-  it { is_expected.to have_many(:all_billing_entities).class_name("BillingEntity") }
-  it { is_expected.to have_one(:default_billing_entity).class_name("BillingEntity") }
-  it { is_expected.to have_many(:webhook_endpoints) }
-  it { is_expected.to have_many(:webhooks).through(:webhook_endpoints) }
-  it { is_expected.to have_many(:hubspot_integrations) }
-  it { is_expected.to have_many(:netsuite_integrations) }
-  it { is_expected.to have_many(:xero_integrations) }
-  it { is_expected.to have_one(:salesforce_integration) }
-  it { is_expected.to have_many(:data_exports) }
-  it { is_expected.to have_many(:dunning_campaigns) }
-  it { is_expected.to have_many(:daily_usages) }
-  it { is_expected.to have_many(:invoice_custom_sections) }
-  it { is_expected.to have_many(:invoice_custom_section_selections) }
-  it { is_expected.to have_many(:manual_invoice_custom_sections) }
-  it { is_expected.to have_many(:system_generated_invoice_custom_sections) }
-  it { is_expected.to have_many(:selected_invoice_custom_sections) }
-
-  it { is_expected.to have_one(:applied_dunning_campaign).conditions(applied_to_organization: true) }
-
-  it { is_expected.to validate_inclusion_of(:default_currency).in_array(described_class.currency_list) }
 
   it "sets the default value to true" do
     expect(organization.finalize_zero_amount_invoice).to eq true
@@ -50,6 +65,10 @@ RSpec.describe Organization, type: :model do
   it_behaves_like "paper_trail traceable"
 
   describe "Validations" do
+    it do
+      expect(subject).to validate_inclusion_of(:default_currency).in_array(described_class.currency_list)
+    end
+
     it "is valid with valid attributes" do
       expect(organization).to be_valid
     end
@@ -250,21 +269,6 @@ RSpec.describe Organization, type: :model do
     end
   end
 
-  describe "#reset_customers_last_dunning_campaign_attempt" do
-    let(:last_dunning_campaign_attempt_at) { 1.day.ago }
-    let(:campaign) { create(:dunning_campaign, organization:) }
-
-    it "resets the last dunning campaign attempt for customers" do
-      customer1 = create(:customer, organization:, last_dunning_campaign_attempt: 1, last_dunning_campaign_attempt_at:)
-      customer2 = create(:customer, organization:, last_dunning_campaign_attempt: 1, last_dunning_campaign_attempt_at:, applied_dunning_campaign: campaign)
-
-      expect { organization.reset_customers_last_dunning_campaign_attempt }
-        .to change { customer1.reload.last_dunning_campaign_attempt }.from(1).to(0)
-        .and change(customer1, :last_dunning_campaign_attempt_at).from(last_dunning_campaign_attempt_at).to(nil)
-      expect(customer2.reload.last_dunning_campaign_attempt).to eq(1)
-    end
-  end
-
   describe "#can_create_billing_entity?" do
     subject { organization.can_create_billing_entity? }
 
@@ -323,6 +327,18 @@ RSpec.describe Organization, type: :model do
     end
   end
 
+  describe "#using_lifetime_usage?" do
+    around { |test| lago_premium!(&test) }
+
+    it do
+      expect(build(:organization, premium_integrations: ["lifetime_usage"])).to be_using_lifetime_usage
+      expect(build(:organization, premium_integrations: ["progressive_billing"])).to be_using_lifetime_usage
+      expect(build(:organization, premium_integrations: ["lifetime_usage", "progressive_billing"])).to be_using_lifetime_usage
+      expect(build(:organization, premium_integrations: [])).not_to be_using_lifetime_usage
+      expect(build(:organization, premium_integrations: ["okta"])).not_to be_using_lifetime_usage
+    end
+  end
+
   describe "#admins" do
     subject { organization.admins }
 
@@ -330,8 +346,10 @@ RSpec.describe Organization, type: :model do
     let(:scoped) { create(:membership, organization:).user }
 
     before do
+      scoped
       create(:membership)
       create(:membership, organization:, role: [:manager, :finance].sample)
+      create(:membership, organization:, role: :admin, status: :revoked)
     end
 
     it "returns admins of the organization" do
@@ -431,22 +449,6 @@ RSpec.describe Organization, type: :model do
     end
   end
 
-  describe "scoped invoice_custom_sections" do
-    let(:organization) { create(:organization) }
-    let(:manual_section) { create(:invoice_custom_section, organization:, section_type: :manual) }
-    let(:system_generated_section) { create(:invoice_custom_section, organization:, section_type: :system_generated) }
-
-    before do
-      manual_section
-      system_generated_section
-    end
-
-    it "returns the correct invoice custom sections for each scope" do
-      expect(organization.manual_invoice_custom_sections).to contain_exactly(manual_section)
-      expect(organization.system_generated_invoice_custom_sections).to contain_exactly(system_generated_section)
-    end
-  end
-
   describe "default_currency" do
     let(:organization) { create(:organization, default_currency: "USD") }
     let(:billing_entity) { create(:billing_entity, organization:, default_currency: "EUR") }
@@ -472,6 +474,24 @@ RSpec.describe Organization, type: :model do
 
     it "ignores existing value in organization and uses value from default_billing_entity" do
       expect(organization.timezone).to eq("Europe/London")
+    end
+  end
+
+  describe "postgres_events_store?" do
+    let(:organization) { create(:organization, clickhouse_events_store: true) }
+
+    it "returns true if postgres_events_store is true" do
+      expect(organization).not_to be_postgres_events_store
+      expect(organization).to be_clickhouse_events_store
+    end
+
+    context "when clickhouse_events_store is false" do
+      let(:organization) { create(:organization, clickhouse_events_store: false) }
+
+      it "returns false" do
+        expect(organization).not_to be_clickhouse_events_store
+        expect(organization).to be_postgres_events_store
+      end
     end
   end
 end

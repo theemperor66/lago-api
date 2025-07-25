@@ -19,10 +19,12 @@ module V1
         customers_count: 0,
         active_subscriptions_count: 0,
         draft_invoices_count: 0,
-        parent_id: model.parent_id
+        parent_id: model.parent_id,
+        pending_deletion: model.pending_deletion
       }
 
       payload.merge!(charges) if include?(:charges)
+      payload.merge!(entitlements) if include?(:entitlements)
       payload.merge!(usage_thresholds) if include?(:usage_thresholds)
       payload.merge!(taxes) if include?(:taxes)
       payload.merge!(minimum_commitment) if include?(:minimum_commitment) && model.minimum_commitment
@@ -34,10 +36,18 @@ module V1
 
     def charges
       ::CollectionSerializer.new(
-        model.charges,
+        model.charges.includes(:applied_pricing_unit),
         ::V1::ChargeSerializer,
         collection_name: "charges",
         includes: include?(:taxes) ? %i[taxes] : []
+      ).serialize
+    end
+
+    def entitlements
+      ::CollectionSerializer.new(
+        model.entitlements.includes(:feature, values: :privilege),
+        ::V1::Entitlement::PlanEntitlementSerializer,
+        collection_name: "entitlements"
       ).serialize
     end
 

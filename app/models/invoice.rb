@@ -45,7 +45,10 @@ class Invoice < ApplicationRecord
   has_many :usage_thresholds, through: :applied_usage_thresholds
   has_many :applied_invoice_custom_sections
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    as: :resource
 
   has_one_attached :file
 
@@ -104,7 +107,7 @@ class Invoice < ApplicationRecord
     end
 
     event :void do
-      transitions from: :finalized, to: :voided, guard: :voidable?, after: :void_invoice!
+      transitions from: :finalized, to: :voided, after: :handle_void_transition!
     end
   end
 
@@ -145,6 +148,10 @@ class Invoice < ApplicationRecord
 
   def self.ransackable_associations(_ = nil)
     %w[customer]
+  end
+
+  def payment_invoices
+    Invoice.where(id: id)
   end
 
   def visible?
@@ -188,7 +195,7 @@ class Invoice < ApplicationRecord
     invoice_subscription(subscription_id).fees
   end
 
-  def progressice_billing_credits(subscription)
+  def progressive_billing_credits_for_subscription(subscription)
     credits.where(
       progressive_billing_invoice_id: subscription.invoices.progressive_billing.select(:id)
     )
@@ -404,8 +411,11 @@ class Invoice < ApplicationRecord
     status_changed_to_finalized?
   end
 
-  def void_invoice!
-    update!(ready_for_payment_processing: false)
+  def handle_void_transition!
+    update!(
+      ready_for_payment_processing: false,
+      voided_at: Time.current
+    )
   end
 
   def ensure_number
@@ -562,6 +572,7 @@ end
 #  organization_id                         :uuid             not null
 #  organization_sequential_id              :integer          default(0), not null
 #  sequential_id                           :integer
+#  voided_invoice_id                       :uuid
 #
 # Indexes
 #
@@ -578,6 +589,7 @@ end
 #  index_invoices_on_self_billed                                   (self_billed)
 #  index_invoices_on_sequential_id                                 (sequential_id)
 #  index_invoices_on_status                                        (status)
+#  index_invoices_on_voided_invoice_id                             (voided_invoice_id)
 #
 # Foreign Keys
 #

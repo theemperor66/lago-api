@@ -43,7 +43,14 @@ module ChargeFilters
             end
 
             if parent_filter.blank? || parent_filter_properties(parent_filter) != filter.properties
+              # Make sure that pricing group keys are cascaded even if properties are overridden
+              cascade_pricing_group_keys(filter, filter_param)
+              filter.save!
+
+              PaperTrail.request.disable_model(filter.class)
+              # NOTE: Make sure update_at is touched even if not changed to keep the order
               filter.touch # rubocop:disable Rails/SkipsModelValidations
+              PaperTrail.request.enable_model(filter.class)
               result.filters << filter
 
               next
@@ -58,8 +65,10 @@ module ChargeFilters
             properties: filter_param[:properties]
           ).properties
           if filter.save! && touch && !filter.changed?
+            PaperTrail.request.disable_model(filter.class)
             # NOTE: Make sure update_at is touched even if not changed to keep the right order
             filter.touch # rubocop:disable Rails/SkipsModelValidations
+            PaperTrail.request.enable_model(filter.class)
           end
 
           # NOTE: Create or update the filter values
@@ -68,12 +77,14 @@ module ChargeFilters
 
             filter_value = filter.values.find_or_initialize_by(
               billable_metric_filter_id: billable_metric_filter&.id
-            )
+            ) { it.organization_id = charge.organization_id }
 
             filter_value.values = values
             if filter_value.save! && touch && !filter_value.changed?
+              PaperTrail.request.disable_model(filter_value.class)
               # NOTE: Make sure update_at is touched even if not changed to keep the right order
               filter_value.touch # rubocop:disable Rails/SkipsModelValidations
+              PaperTrail.request.enable_model(filter_value.class)
             end
           end
 
@@ -83,8 +94,8 @@ module ChargeFilters
         # NOTE: remove old filters that were not created or updated
         remove_query = charge.filters
         remove_query = remove_query.where(id: inherited_filter_ids) if cascade_updates && parent_filters
-        remove_query.where.not(id: result.filters.map(&:id)).find_each do
-          remove_filter(_1)
+        remove_query.where.not(id: result.filters.map(&:id)).unscope(:order).find_each do
+          remove_filter(it)
         end
       end
 
@@ -110,9 +121,9 @@ module ChargeFilters
     def remove_all
       ActiveRecord::Base.transaction do
         if cascade_updates
-          charge.filters.where(id: inherited_filter_ids).find_each { remove_filter(_1) }
+          charge.filters.where(id: inherited_filter_ids).unscope(:order).find_each { remove_filter(it) }
         else
-          charge.filters.each { remove_filter(_1) }
+          charge.filters.each { remove_filter(it) }
         end
       end
     end
@@ -129,7 +140,7 @@ module ChargeFilters
 
       return @inherited_filter_ids if parent_filters.blank? || !cascade_updates
 
-      parent_filters.find_each do |pf|
+      parent_filters.unscope(:order).find_each do |pf|
         value = pf.to_h_with_discarded.sort
 
         match = filters.find do |f|
@@ -140,6 +151,18 @@ module ChargeFilters
       end
 
       @inherited_filter_ids
+    end
+
+    def cascade_pricing_group_keys(filter, params)
+      pricing_group_keys = params.dig(:properties, :pricing_group_keys) || params.dig(:properties, :grouped_by)
+
+      if pricing_group_keys
+        filter.properties["pricing_group_keys"] = pricing_group_keys
+        filter.properties.delete("grouped_by")
+      elsif filter.pricing_group_keys.present?
+        filter.properties.delete("pricing_group_keys")
+        filter.properties.delete("grouped_by")
+      end
     end
   end
 end

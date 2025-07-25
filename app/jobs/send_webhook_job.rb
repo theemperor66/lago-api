@@ -14,6 +14,7 @@ class SendWebhookJob < ApplicationJob
   retry_on ActiveJob::DeserializationError, wait: :polynomially_longer, attempts: 6
 
   WEBHOOK_SERVICES = {
+    "alert.triggered" => Webhooks::UsageMonitoring::AlertTriggeredService,
     "invoice.created" => Webhooks::Invoices::CreatedService,
     "invoice.one_off_created" => Webhooks::Invoices::OneOffCreatedService,
     "invoice.add_on_added" => Webhooks::Invoices::AddOnCreatedService,
@@ -52,6 +53,12 @@ class SendWebhookJob < ApplicationJob
     "payment_request.created" => Webhooks::PaymentRequests::CreatedService,
     "payment_request.payment_failure" => Webhooks::PaymentProviders::PaymentRequestPaymentFailureService,
     "payment_request.payment_status_updated" => Webhooks::PaymentRequests::PaymentStatusUpdatedService,
+    "plan.created" => Webhooks::Plans::CreatedService,
+    "plan.deleted" => Webhooks::Plans::DeletedService,
+    "plan.updated" => Webhooks::Plans::UpdatedService,
+    "feature.created" => Webhooks::Features::CreatedService,
+    "feature.updated" => Webhooks::Features::UpdatedService,
+    "feature.deleted" => Webhooks::Features::DeletedService,
     "subscription.terminated" => Webhooks::Subscriptions::TerminatedService,
     "subscription.started" => Webhooks::Subscriptions::StartedService,
     "subscription.termination_alert" => Webhooks::Subscriptions::TerminationAlertService,

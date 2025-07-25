@@ -52,6 +52,12 @@ RSpec.describe Wallets::CreateService, type: :service do
         .to have_enqueued_job(SendWebhookJob).with("wallet.created", Wallet)
     end
 
+    it "produces an activity log" do
+      wallet = described_class.call(params:).wallet
+
+      expect(Utils::ActivityLog).to have_produced("wallet.created").after_commit.with(wallet)
+    end
+
     it "enqueues the WalletTransaction::CreateJob" do
       expect { service_result }
         .to have_enqueued_job(WalletTransactions::CreateJob)
@@ -234,6 +240,104 @@ RSpec.describe Wallets::CreateService, type: :service do
         it "returns an error" do
           expect(service_result).not_to be_success
           expect(service_result.error.messages[:recurring_transaction_rules]).to eq(["invalid_recurring_rule"])
+        end
+      end
+    end
+
+    context "with limitations" do
+      let(:limitations) do
+        {
+          fee_types: %w[charge]
+        }
+      end
+      let(:params) do
+        {
+          name: "New Wallet",
+          customer:,
+          organization_id: organization.id,
+          currency: "EUR",
+          rate_amount: "1.00",
+          expiration_at:,
+          paid_credits:,
+          granted_credits:,
+          applies_to: limitations
+        }
+      end
+
+      it "creates a wallet with correct limitations" do
+        expect { service_result }.to change(Wallet, :count).by(1)
+        expect(service_result).to be_success
+
+        wallet = service_result.wallet
+        expect(wallet.reload.name).to eq("New Wallet")
+        expect(wallet.reload.allowed_fee_types).to eq(%w[charge])
+      end
+
+      context "when fee limitations are not correct" do
+        let(:limitations) do
+          {
+            fee_types: %w[invalid]
+          }
+        end
+
+        it "returns an error" do
+          expect(service_result).not_to be_success
+          expect(service_result.error.messages[:applies_to]).to eq(["invalid_limitations"])
+        end
+      end
+
+      context "with billable metric limitations in graphql context" do
+        let(:billable_metric) { create(:billable_metric, organization:) }
+        let(:limitations) do
+          {
+            billable_metric_ids: [billable_metric.id]
+          }
+        end
+
+        before { CurrentContext.source = "graphql" }
+
+        it "creates a wallet" do
+          expect { service_result }.to change(Wallet, :count).by(1)
+          expect(service_result).to be_success
+        end
+
+        it "creates a wallet target" do
+          expect { create_service.call }
+            .to change(WalletTarget, :count).by(1)
+        end
+
+        context "with invalid billable metric" do
+          let(:limitations) do
+            {
+              billable_metric_ids: [billable_metric.id, "invalid"]
+            }
+          end
+
+          it "returns an error" do
+            expect(service_result).not_to be_success
+            expect(service_result.error.messages[:applies_to]).to eq(["invalid_limitations"])
+          end
+        end
+      end
+
+      context "with billable metric limitations in api context" do
+        let(:billable_metric) { create(:billable_metric, organization:) }
+        let(:limitations) do
+          {
+            billable_metric_codes: [billable_metric.code]
+          }
+        end
+
+        before { CurrentContext.source = "api" }
+
+        it "creates a wallet" do
+          expect { service_result }.to change(Wallet, :count).by(1)
+          expect(service_result).to be_success
+        end
+
+        it "creates a wallet target" do
+          expect { create_service.call }
+            .to change(WalletTarget, :count).by(1)
         end
       end
     end

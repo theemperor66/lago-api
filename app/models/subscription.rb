@@ -2,12 +2,13 @@
 
 class Subscription < ApplicationRecord
   include PaperTrailTraceable
+  include RansackUuidSearch
 
   belongs_to :customer, -> { with_discarded }
   belongs_to :plan, -> { with_discarded }
   belongs_to :previous_subscription, class_name: "Subscription", optional: true
+  belongs_to :organization
 
-  has_one :organization, through: :customer
   has_one :billing_entity, through: :customer
   has_many :next_subscriptions, class_name: "Subscription", foreign_key: :previous_subscription_id
   has_many :events
@@ -17,8 +18,13 @@ class Subscription < ApplicationRecord
   has_many :fees
   has_many :daily_usages
   has_many :usage_thresholds, through: :plan
+  has_many :entitlements, class_name: "Entitlement::Entitlement"
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    foreign_key: :external_subscription_id,
+    primary_key: :external_id
 
   has_one :lifetime_usage, autosave: true
   has_one :subscription_activity, class_name: "UsageMonitoring::SubscriptionActivity"
@@ -38,8 +44,15 @@ class Subscription < ApplicationRecord
     anniversary
   ].freeze
 
+  ON_TERMINATION_CREDIT_NOTES = {credit: "credit", skip: "skip"}.freeze
+  ON_TERMINATION_INVOICES = {generate: "generate", skip: "skip"}.freeze
+
   enum :status, STATUSES
   enum :billing_time, BILLING_TIME
+  enum :on_termination_credit_note, ON_TERMINATION_CREDIT_NOTES, prefix: true
+  enum :on_termination_invoice, ON_TERMINATION_INVOICES, prefix: true
+
+  validates :on_termination_credit_note, absence: true, if: -> { plan&.pay_in_arrears? }
 
   scope :starting_in_the_future, -> { pending.where(previous_subscription: nil) }
 
@@ -57,6 +70,14 @@ class Subscription < ApplicationRecord
       subscriptions.ending_at::timestamptz AT TIME ZONE
       COALESCE(customers.timezone, organizations.timezone, 'UTC')
     SQL
+  end
+
+  def self.ransackable_attributes(_ = nil)
+    %w[id name external_id]
+  end
+
+  def self.ransackable_associations(_ = nil)
+    %w[customer plan]
   end
 
   def mark_as_active!(timestamp = Time.current)
@@ -226,23 +247,25 @@ end
 #
 # Table name: subscriptions
 #
-#  id                       :uuid             not null, primary key
-#  billing_time             :integer          default("calendar"), not null
-#  canceled_at              :datetime
-#  ending_at                :datetime
-#  name                     :string
-#  started_at               :datetime
-#  status                   :integer          not null
-#  subscription_at          :datetime
-#  terminated_at            :datetime
-#  trial_ended_at           :datetime
-#  created_at               :datetime         not null
-#  updated_at               :datetime         not null
-#  customer_id              :uuid             not null
-#  external_id              :string           not null
-#  organization_id          :uuid
-#  plan_id                  :uuid             not null
-#  previous_subscription_id :uuid
+#  id                         :uuid             not null, primary key
+#  billing_time               :integer          default("calendar"), not null
+#  canceled_at                :datetime
+#  ending_at                  :datetime
+#  name                       :string
+#  on_termination_credit_note :enum
+#  on_termination_invoice     :enum             default("generate"), not null
+#  started_at                 :datetime
+#  status                     :integer          not null
+#  subscription_at            :datetime
+#  terminated_at              :datetime
+#  trial_ended_at             :datetime
+#  created_at                 :datetime         not null
+#  updated_at                 :datetime         not null
+#  customer_id                :uuid             not null
+#  external_id                :string           not null
+#  organization_id            :uuid             not null
+#  plan_id                    :uuid             not null
+#  previous_subscription_id   :uuid
 #
 # Indexes
 #

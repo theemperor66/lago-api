@@ -78,8 +78,9 @@ module PaymentProviders
           end
 
           # NOTE: Retrieve list of existing payment_methods
-          payment_method = ::Stripe::PaymentMethod.list(
-            {customer: provider_customer.provider_customer_id},
+          payment_method = ::Stripe::Customer.list_payment_methods(
+            provider_customer.provider_customer_id,
+            {},
             {api_key: payment_provider.secret_key}
           ).first
           provider_customer.update!(payment_method_id: payment_method&.id)
@@ -177,8 +178,25 @@ module PaymentProviders
         end
 
         def handle_eu_bank_transfer
-          customer_country = payment.customer.country.upcase
-          {type: "eu_bank_transfer", eu_bank_transfer: {country: customer_country}}
+          customer_country = payment.customer.country&.upcase
+          billing_entity_country = payment.customer.billing_entity.country&.upcase
+
+          country =
+            if PaymentProviders::StripeProvider::SUPPORTED_EU_BANK_TRANSFER_COUNTRIES.include?(customer_country)
+              customer_country
+            elsif PaymentProviders::StripeProvider::SUPPORTED_EU_BANK_TRANSFER_COUNTRIES.include?(billing_entity_country)
+              billing_entity_country
+            else
+              result.service_failure!(
+                code: "missing_country",
+                message: "No country found for customer or organization supported for EU bank transfer payload"
+              ).raise_if_error!
+            end
+
+          {
+            type: "eu_bank_transfer",
+            eu_bank_transfer: {country: country}
+          }
         end
 
         def success_redirect_url

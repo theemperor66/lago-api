@@ -4,11 +4,11 @@ module PaymentProviders
   module Stripe
     class RegisterWebhookService < BaseService
       def call
+        params = webhook_endpoint_shared_params
+        params[:api_version] = ::Stripe.api_version
+
         stripe_webhook = ::Stripe::WebhookEndpoint.create(
-          {
-            url: webhook_end_point,
-            enabled_events: PaymentProviders::StripeProvider::WEBHOOKS_EVENTS
-          },
+          params,
           {api_key:}
         )
 
@@ -29,15 +29,6 @@ module PaymentProviders
 
         deliver_error_webhook(action: "payment_provider.register_webhook", error: e)
         result
-      end
-
-      private
-
-      def webhook_end_point
-        URI.join(
-          ENV["LAGO_API_URL"],
-          "webhooks/stripe/#{organization_id}?code=#{URI.encode_www_form_component(payment_provider.code)}"
-        )
       end
     end
   end

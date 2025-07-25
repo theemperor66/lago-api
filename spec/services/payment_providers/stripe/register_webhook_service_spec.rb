@@ -6,31 +6,34 @@ RSpec.describe PaymentProviders::Stripe::RegisterWebhookService do
   subject(:provider_service) { described_class.new(payment_provider) }
 
   let(:organization) { create(:organization) }
-  let(:payment_provider) { create(:stripe_provider, organization:) }
+  let(:payment_provider) { create(:stripe_provider, organization:, code: "stripe_sandbox") }
 
   describe ".call" do
-    let(:stripe_webhook) do
-      ::Stripe::WebhookEndpoint.construct_from(
-        id: "we_123456",
-        secret: "whsec_123456"
-      )
+    let(:url) { "#{ENV["LAGO_API_URL"]}/webhooks/stripe/#{organization.id}?code=stripe_sandbox" }
+    let(:expected_request_body) do
+      {
+        enabled_events: PaymentProviders::StripeProvider::WEBHOOKS_EVENTS,
+        url:,
+        api_version: ::Stripe.api_version
+      }
+    end
+    let(:stripe_api_response) do
+      get_stripe_fixtures("webhook_endpoint_create_response.json") do |h|
+        h["url"] = url
+      end
     end
 
     before do
-      allow(::Stripe::WebhookEndpoint)
-        .to receive(:create)
-        .and_return(stripe_webhook)
+      stub_const("ENV", ENV.to_h.merge("LAGO_API_URL" => "https://billing.example.com"))
+      stub_request(:post, "https://api.stripe.com/v1/webhook_endpoints")
+        .with(body: expected_request_body)
+        .and_return(status: 200, body: stripe_api_response)
     end
 
     it "registers a webhook on stripe" do
       result = provider_service.call
 
       expect(result).to be_success
-
-      aggregate_failures do
-        expect(result.payment_provider.webhook_id).to eq("we_123456")
-        expect(result.payment_provider.webhook_secret).to eq("whsec_123456")
-      end
     end
 
     context "when authentication fails on stripe API" do

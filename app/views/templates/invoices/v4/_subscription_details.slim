@@ -17,7 +17,7 @@
           td.body-2 = I18n.t('invoice.amount')
 
         - if FeeDisplayHelper.should_display_subscription_fee?(invoice_subscription)
-          tr
+          tr.fee
             - if subscription_fee&.invoice_display_name&.present?
               td.body-1 = subscription_fee&.invoice_display_name
             - else
@@ -90,7 +90,7 @@
 
       - if commitment_fee
         table.invoice-resume-table width="100%"
-          tr
+          tr.fee
             td.body-1 = commitment_fee.invoice_name
             td.body-2 = 1
             td.body-2 = MoneyHelper.format(commitment_fee.amount)
@@ -188,7 +188,7 @@
               = MoneyHelper.format(total_amount)
         - else
           - if progressive_billing_credit_amount_cents.positive?
-            - credits = progressice_billing_credits(invoice_subscription.subscription).all
+            - credits = progressive_billing_credits_for_subscription(invoice_subscription.subscription).all
             - if credits.present?
               tr
                 td.body-2

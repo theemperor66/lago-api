@@ -5,13 +5,17 @@ module Wallets
     def call
       recurring_transaction_rules.each do |recurring_transaction_rule|
         wallet = recurring_transaction_rule.wallet
+        paid_credits = paid_credits(recurring_transaction_rule)
+        granted_credits = granted_credits(recurring_transaction_rule)
+
+        next if recurring_transaction_rule.target? && paid_credits.zero? && granted_credits.zero?
 
         WalletTransactions::CreateJob.perform_later(
           organization_id: wallet.organization.id,
           params: {
             wallet_id: wallet.id,
-            paid_credits: paid_credits(recurring_transaction_rule),
-            granted_credits: granted_credits(recurring_transaction_rule),
+            paid_credits: paid_credits.to_s,
+            granted_credits: granted_credits.to_s,
             source: :interval,
             invoice_requires_successful_payment: recurring_transaction_rule.invoice_requires_successful_payment?,
             metadata: recurring_transaction_rule.transaction_metadata
@@ -27,15 +31,15 @@ module Wallets
     end
 
     def paid_credits(rule)
-      return (rule.target_ongoing_balance - rule.wallet.credits_ongoing_balance).to_s if rule.target?
+      return [(rule.target_ongoing_balance - rule.wallet.credits_ongoing_balance), 0.0].max if rule.target?
 
-      rule.paid_credits.to_s
+      rule.paid_credits
     end
 
     def granted_credits(rule)
-      return "0.0" if rule.target?
+      return 0.0 if rule.target?
 
-      rule.granted_credits.to_s
+      rule.granted_credits
     end
 
     # NOTE: Retrieve list of recurring_transaction_rules that should create wallet transactions today
@@ -60,7 +64,7 @@ module Wallets
           INNER JOIN pending_recurring_rules ON pending_recurring_rules.rule_id = recurring_transaction_rules.id
           INNER JOIN wallets ON wallets.id = recurring_transaction_rules.wallet_id
           INNER JOIN customers ON customers.id = wallets.customer_id
-          INNER JOIN organizations ON organizations.id = customers.organization_id
+          INNER JOIN billing_entities ON billing_entities.id = customers.billing_entity_id
           LEFT JOIN already_applied_today ON already_applied_today.wallet_id = wallets.id
         WHERE
           -- Exclude top-ups already applied today
@@ -79,12 +83,12 @@ module Wallets
         FROM recurring_transaction_rules
           INNER JOIN wallets ON wallets.id = recurring_transaction_rules.wallet_id
           INNER JOIN customers ON customers.id = wallets.customer_id
-          INNER JOIN organizations ON organizations.id = customers.organization_id
+          INNER JOIN billing_entities ON billing_entities.id = customers.billing_entity_id
         WHERE wallets.status = #{Wallet.statuses[:active]} 
           AND recurring_transaction_rules.status = #{RecurringTransactionRule.statuses[:active]}
           AND recurring_transaction_rules.trigger = #{RecurringTransactionRule.triggers[:interval]}
           AND recurring_transaction_rules.interval = #{RecurringTransactionRule.intervals[interval]}
-          AND (recurring_transaction_rules.expiration_at IS NULL 
+          AND (recurring_transaction_rules.expiration_at IS NULL
            OR recurring_transaction_rules.expiration_at > '#{Time.current.utc.strftime("%Y-%m-%d %H:%M:%S")}')
           AND #{conditions.join(" AND ")}
         GROUP BY recurring_transaction_rules.id
@@ -211,12 +215,12 @@ module Wallets
         FROM wallet_transactions
           INNER JOIN wallets AS wal ON wallet_transactions.wallet_id = wal.id
           INNER JOIN customers AS cus ON wal.customer_id = cus.id
-          INNER JOIN organizations AS org ON cus.organization_id = org.id
+          INNER JOIN billing_entities ON cus.billing_entity_id = billing_entities.id
         WHERE wallet_transactions.source = #{WalletTransaction.sources[:interval]}
           AND wallet_transactions.transaction_type = #{WalletTransaction.transaction_types[:inbound]}
           AND DATE(
-            (wallet_transactions.created_at)#{at_time_zone(customer: "cus", organization: "org")}
-          ) = DATE(:today#{at_time_zone(customer: "cus", organization: "org")})
+            (wallet_transactions.created_at)#{at_time_zone(customer: "cus", billing_entity: "billing_entities")}
+          ) = DATE(:today#{at_time_zone(customer: "cus", billing_entity: "billing_entities")})
         GROUP BY wallet_transactions.wallet_id
       SQL
     end

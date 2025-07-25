@@ -7,7 +7,15 @@ module Wallets
       super
     end
 
+    activity_loggable(
+      action: "wallet.created",
+      record: -> { result.wallet }
+    )
+
     def call
+      result.billable_metric_identifiers = billable_metric_identifiers
+      result.billable_metrics = billable_metrics
+
       return result unless valid?
 
       attributes = {
@@ -23,6 +31,10 @@ module Wallets
         attributes[:invoice_requires_successful_payment] = ActiveModel::Type::Boolean.new.cast(params[:invoice_requires_successful_payment])
       end
 
+      if params.key?(:applies_to)
+        attributes[:allowed_fee_types] = params[:applies_to][:fee_types] if params[:applies_to].key?(:fee_types)
+      end
+
       wallet = Wallet.new(attributes)
 
       ActiveRecord::Base.transaction do
@@ -35,6 +47,10 @@ module Wallets
 
         if params[:recurring_transaction_rules].present?
           Wallets::RecurringTransactionRules::CreateService.call(wallet:, wallet_params: params)
+        end
+
+        billable_metrics.each do |bm|
+          WalletTarget.create!(wallet:, billable_metric: bm, organization_id: wallet.organization_id)
         end
       end
 
@@ -66,6 +82,27 @@ module Wallets
 
     def valid?
       Wallets::ValidateService.new(result, **params).valid?
+    end
+
+    def billable_metric_identifiers
+      return [] if params[:applies_to].blank?
+
+      key = api_context? ? :billable_metric_codes : :billable_metric_ids
+
+      return [] if params[:applies_to][key].blank?
+
+      params[:applies_to][key]&.compact&.uniq
+    end
+
+    def billable_metrics
+      return @billable_metrics if defined?(@billable_metrics)
+      return [] if billable_metric_identifiers.blank?
+
+      @billable_metrics = if api_context?
+        BillableMetric.where(code: billable_metric_identifiers, organization_id: params[:organization_id])
+      else
+        BillableMetric.where(id: billable_metric_identifiers, organization_id: params[:organization_id])
+      end
     end
   end
 end

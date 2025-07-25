@@ -17,7 +17,8 @@ RSpec.describe Payment, type: :model do
   it { is_expected.to have_many(:integration_resources) }
   it { is_expected.to have_one(:payment_receipt) }
   it { is_expected.to belong_to(:payable) }
-  it { is_expected.to delegate_method(:customer).to(:payable) }
+  it { is_expected.to belong_to(:organization) }
+  it { is_expected.to belong_to(:customer).optional }
   it { is_expected.to validate_presence_of(:payment_type) }
 
   it do
@@ -304,6 +305,27 @@ RSpec.describe Payment, type: :model do
             end
           end
         end
+      end
+    end
+  end
+
+  describe "#invoices" do
+    context "when payable is an invoice" do
+      let(:payable) { create(:invoice) }
+
+      it "returns the invoice as a relationship" do
+        expect(subject.invoices).to be_a(ActiveRecord::Relation)
+        expect(subject.invoices.sole).to eq payable
+      end
+    end
+
+    context "when payable is a payment request" do
+      let(:invoices) { create_list(:invoice, 2) }
+      let(:payable) { create(:payment_request, invoices:) }
+
+      it "returns the payable in an array" do
+        expect(subject.invoices).to be_a ActiveRecord::Relation
+        expect(subject.invoices).to eq(invoices)
       end
     end
   end

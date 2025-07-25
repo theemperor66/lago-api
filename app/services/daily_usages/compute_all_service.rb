@@ -10,7 +10,7 @@ module DailyUsages
 
     def call
       subscriptions.find_each do |subscription|
-        DailyUsages::ComputeJob.perform_later(subscription, timestamp:)
+        DailyUsages::ComputeJob.set(wait: rand(30.minutes)).perform_later(subscription, timestamp:)
       end
 
       result
@@ -25,7 +25,7 @@ module DailyUsages
       #                   This might change in the future
       Subscription
         .with(existing_daily_usage:)
-        .joins(customer: :organization)
+        .joins(customer: [:organization, :billing_entity])
         .merge(Organization.with_revenue_analytics_support)
         .joins("LEFT JOIN existing_daily_usage ON subscriptions.id = existing_daily_usage.subscription_id")
         .active

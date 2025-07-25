@@ -10,6 +10,26 @@ RSpec.describe Credit, type: :model do
     it { is_expected.to belong_to(:applied_coupon).optional }
     it { is_expected.to belong_to(:credit_note).optional }
     it { is_expected.to belong_to(:progressive_billing_invoice).optional }
+    it { is_expected.to belong_to(:organization) }
+  end
+
+  describe "scopes" do
+    let!(:active_invoice) { create(:invoice, status: :finalized) }
+    let!(:voided_invoice) { create(:invoice, status: :voided) }
+    let!(:active_credit) { create(:credit, invoice: active_invoice) }
+    let!(:voided_credit) { create(:credit, invoice: voided_invoice) }
+
+    describe ".active" do
+      it "returns only credits with non-voided invoices" do
+        expect(described_class.active).to match_array([active_credit])
+      end
+    end
+
+    describe ".voided" do
+      it "returns only credits with voided invoices" do
+        expect(described_class.voided).to match_array([voided_credit])
+      end
+    end
   end
 
   describe "invoice item" do

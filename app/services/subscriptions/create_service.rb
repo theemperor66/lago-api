@@ -37,7 +37,14 @@ module Subscriptions
           .call(customer:, currency: plan.amount_currency)
           .raise_if_error!
 
-        result.subscription = handle_subscription
+        customer.with_lock do
+          # Refresh current_subscription inside the lock to avoid stale data
+          @current_subscription = editable_subscriptions.where(id: params[:subscription_id])
+            .or(editable_subscriptions.where(external_id:))
+            .first
+
+          result.subscription = handle_subscription
+        end
       end
 
       result
@@ -125,7 +132,10 @@ module Subscriptions
       end
 
       if new_subscription.active?
-        after_commit { SendWebhookJob.perform_later("subscription.started", new_subscription) }
+        after_commit do
+          SendWebhookJob.perform_later("subscription.started", new_subscription)
+          Utils::ActivityLog.produce(new_subscription, "subscription.started")
+        end
       end
 
       if new_subscription.should_sync_hubspot_subscription?
@@ -164,7 +174,10 @@ module Subscriptions
         ending_at: params.key?(:ending_at) ? params[:ending_at] : current_subscription.ending_at
       )
 
-      after_commit { SendWebhookJob.perform_later("subscription.updated", current_subscription) }
+      after_commit do
+        SendWebhookJob.perform_later("subscription.updated", current_subscription)
+        Utils::ActivityLog.produce(current_subscription, "subscription.updated")
+      end
 
       current_subscription
     end

@@ -120,14 +120,15 @@ RSpec.describe Plans::UpdateService, type: :service do
       result = plans_service.call
 
       updated_plan = result.plan
-      aggregate_failures do
-        expect(updated_plan.name).to eq("Updated plan name")
-        expect(updated_plan.invoice_display_name).to eq(plan_invoice_display_name)
-        expect(updated_plan.taxes.pluck(:code)).to eq([tax2.code])
-        expect(plan.charges.count).to eq(2)
-        expect(plan.charges.order(created_at: :asc).first.invoice_display_name).to eq("charge1")
-        expect(plan.charges.order(created_at: :asc).second.invoice_display_name).to eq("charge2")
-      end
+
+      expect(SendWebhookJob).to have_been_enqueued.with("plan.updated", updated_plan)
+
+      expect(updated_plan.name).to eq("Updated plan name")
+      expect(updated_plan.invoice_display_name).to eq(plan_invoice_display_name)
+      expect(updated_plan.taxes.pluck(:code)).to eq([tax2.code])
+      expect(plan.charges.count).to eq(2)
+      expect(plan.charges.order(created_at: :asc).first.invoice_display_name).to eq("charge1")
+      expect(plan.charges.order(created_at: :asc).second.invoice_display_name).to eq("charge2")
     end
 
     it "marks invoices as ready to be refreshed" do
@@ -136,6 +137,27 @@ RSpec.describe Plans::UpdateService, type: :service do
       create(:invoice_subscription, invoice:, subscription:)
 
       expect { plans_service.call }.to change { invoice.reload.ready_to_be_refreshed }.to(true)
+    end
+
+    context "with activity logs" do
+      context "when no parent" do
+        it "produces" do
+          described_class.call(plan:, params: update_args)
+
+          expect(Utils::ActivityLog).to have_produced("plan.updated").after_commit.with(plan)
+        end
+      end
+
+      context "when plan is a children" do
+        let(:parent_id) { plan.id }
+        let(:child_plan) { create(:plan, organization:, parent_id:) }
+
+        it "does not produce" do
+          described_class.call(plan: child_plan, params: update_args)
+
+          expect(Utils::ActivityLog).not_to have_received(:produce)
+        end
+      end
     end
 
     context "with cascade option" do
@@ -541,7 +563,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           aggregate_failures do
             expect(result).not_to be_success
             expect(result.error).to be_a(BaseService::ValidationFailure)
-            expect(result.error.messages[:charge_model]).to eq(["value_is_mandatory"])
+            expect(result.error.messages[:charge_model]).to eq(["graduated_percentage_requires_premium_license"])
           end
         end
 
@@ -875,7 +897,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for updating charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::UpdateJob)
+            end.not_to have_enqueued_job(Charges::UpdateChildrenJob)
           end
         end
 
@@ -883,17 +905,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "enqueues the job for updating charge" do
             expect do
               plans_service.call
-            end.to have_enqueued_job(Charges::UpdateJob)
-          end
-        end
-
-        context "when cascade is true and there are children plans without link to parent charge" do
-          let(:charge_parent_id) { nil }
-
-          it "does not enqueue the job for updating charge" do
-            expect do
-              plans_service.call
-            end.not_to have_enqueued_job(Charges::UpdateJob)
+            end.to have_enqueued_job(Charges::UpdateChildrenJob)
           end
         end
 
@@ -905,7 +917,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for updating charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::DestroyJob)
+            end.not_to have_enqueued_job(Charges::DestroyChildrenJob)
           end
         end
       end
@@ -925,7 +937,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for creating new charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::CreateJob)
+            end.not_to have_enqueued_job(Charges::CreateChildrenJob)
           end
         end
 
@@ -933,7 +945,8 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "enqueues the job for creating new charge" do
             expect do
               plans_service.call
-            end.to have_enqueued_job(Charges::CreateJob)
+            end.to have_enqueued_job(Charges::CreateChildrenJob)
+              .with(charge: Charge, payload: Hash)
           end
         end
 
@@ -945,7 +958,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for creating new charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::CreateJob)
+            end.not_to have_enqueued_job(Charges::CreateChildrenJob)
           end
         end
       end
@@ -1055,7 +1068,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for removing charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::DestroyJob)
+            end.not_to have_enqueued_job(Charges::DestroyChildrenJob)
           end
         end
 
@@ -1063,17 +1076,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "enqueues the job for removing charge" do
             expect do
               plans_service.call
-            end.to have_enqueued_job(Charges::DestroyJob)
-          end
-        end
-
-        context "when cascade is true and there are children plans without link to parent charge" do
-          let(:charge_parent_id) { nil }
-
-          it "does not enqueue the job for removing charge" do
-            expect do
-              plans_service.call
-            end.not_to have_enqueued_job(Charges::DestroyJob)
+            end.to have_enqueued_job(Charges::DestroyChildrenJob)
           end
         end
 
@@ -1085,7 +1088,7 @@ RSpec.describe Plans::UpdateService, type: :service do
           it "does not enqueue the job for removing charge" do
             expect do
               plans_service.call
-            end.not_to have_enqueued_job(Charges::DestroyJob)
+            end.not_to have_enqueued_job(Charges::DestroyChildrenJob)
           end
         end
       end
@@ -1138,12 +1141,10 @@ RSpec.describe Plans::UpdateService, type: :service do
 
       it "updates only name description and new charges" do
         result = plans_service.call
-
         updated_plan = result.plan
-        aggregate_failures do
-          expect(updated_plan.name).to eq("Updated plan name")
-          expect(plan.charges.count).to eq(2)
-        end
+
+        expect(updated_plan.name).to eq("Updated plan name")
+        expect(plan.charges.count).to eq(2)
       end
     end
   end

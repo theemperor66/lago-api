@@ -58,7 +58,8 @@ module Integrations
       def throttle!(*providers)
         providers.each do |provider_name|
           if provider == provider_name.to_s
-            raise BaseService::ThrottlingError unless Throttling.for(provider_name.to_sym).check(:client, throttle_key)
+            raise BaseService::ThrottlingError.new(provider_name:) \
+              unless Throttling.for(provider_name.to_sym).check(:client, throttle_key)
           end
         end
       end
@@ -76,7 +77,7 @@ module Integrations
       end
 
       def http_client
-        LagoHttpClient::Client.new(endpoint_url)
+        LagoHttpClient::Client.new(endpoint_url, retries_on: [OpenSSL::SSL::SSLError])
       end
 
       def endpoint_url
@@ -169,7 +170,7 @@ module Integrations
       rescue JSON::ParserError
         if response.body.include?(BAD_REQUEST_ERROR)
           # NOTE: Sometimes, Anrock is responding with an HTTP 200 with a payload containing a 502 error...
-          raise(LagoHttpClient::HttpError.new(502, response.body, http_client.uri))
+          raise(Integrations::Aggregator::BadGatewayError.new(response.body, http_client.uri))
         end
 
         raise

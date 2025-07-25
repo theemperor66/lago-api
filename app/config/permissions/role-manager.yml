@@ -1,6 +1,9 @@
 ---
 audit_logs:
   view: false
+authentication_methods:
+  view: false
+  update: false
 analytics:
   overdue_balances:
     view: true
@@ -16,6 +19,10 @@ plans:
   create: false
   update: false
   delete: false
+pricing_units:
+  view: false
+  create: false
+  update: false
 addons:
   create: false
   update: false
@@ -76,7 +83,7 @@ organization:
     update: false
     delete: false
 billing_entities:
-  view: false
+  view: true
   create: false
   update: false
   delete: false
@@ -88,6 +95,8 @@ billing_entities:
     update: false
   emails:
     view: false
+    update: false
+  dunning_campaigns:
     update: false
 payment_requests:
   view: true

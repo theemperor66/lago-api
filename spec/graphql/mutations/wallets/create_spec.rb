@@ -6,6 +6,7 @@ RSpec.describe Mutations::Wallets::Create, type: :graphql do
   let(:required_permission) { "wallets:create" }
   let(:membership) { create(:membership) }
   let(:customer) { create(:customer, organization: membership.organization, currency: "EUR") }
+  let(:billable_metric) { create(:billable_metric, organization: membership.organization) }
   let(:expiration_at) { Time.zone.now + 1.year }
 
   let(:mutation) do
@@ -33,6 +34,12 @@ RSpec.describe Mutations::Wallets::Create, type: :graphql do
             transactionMetadata {
               key
               value
+            }
+          }
+          appliesTo {
+            feeTypes
+            billableMetrics {
+              id
             }
           }
         }
@@ -78,7 +85,11 @@ RSpec.describe Mutations::Wallets::Create, type: :graphql do
                 {key: "another_key", value: "another_value"}
               ]
             }
-          ]
+          ],
+          appliesTo: {
+            feeTypes: %w[subscription],
+            billableMetricIds: [billable_metric.id]
+          }
         }
       }
     )
@@ -102,6 +113,8 @@ RSpec.describe Mutations::Wallets::Create, type: :graphql do
         {"key" => "example_key", "value" => "example_value"},
         {"key" => "another_key", "value" => "another_value"}
       )
+      expect(result_data["appliesTo"]["feeTypes"]).to eq(["subscription"])
+      expect(result_data["appliesTo"]["billableMetrics"].first["id"]).to eq(billable_metric.id)
     end
 
     expect(WalletTransactions::CreateJob).to have_received(:perform_later).with(

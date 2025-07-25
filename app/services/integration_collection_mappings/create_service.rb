@@ -16,10 +16,12 @@ module IntegrationCollectionMappings
       return result.not_found_failure!(resource: "integration") unless integration
 
       integration_collection_mapping = IntegrationCollectionMappings::Factory.new_instance(integration:).new(
+        organization_id: params[:organization_id],
         integration_id: params[:integration_id],
         mapping_type: params[:mapping_type]
       )
 
+      integration_collection_mapping.organization = integration.organization
       integration_collection_mapping.external_id = params[:external_id] if params.key?(:external_id)
       if params.key?(:external_account_code)
         integration_collection_mapping.external_account_code = params[:external_account_code]

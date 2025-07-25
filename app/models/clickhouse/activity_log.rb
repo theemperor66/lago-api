@@ -8,6 +8,35 @@ module Clickhouse
     belongs_to :organization
     belongs_to :resource, polymorphic: true
 
+    belongs_to :customer,
+      -> { with_discarded },
+      primary_key: :external_id,
+      foreign_key: :external_customer_id,
+      optional: true
+
+    belongs_to :subscription,
+      primary_key: :external_id,
+      foreign_key: :external_subscription_id,
+      optional: true
+
+    belongs_to :user, optional: true
+    belongs_to :api_key, optional: true
+
+    RESOURCE_TYPES_WITH_DISCARDED = %w[BillableMetric Plan Customer BillingEntity Coupon].freeze
+
+    RESOURCE_TYPES = {
+      billable_metric: "BillableMetric",
+      plan: "Plan",
+      customer: "Customer",
+      invoice: "Invoice",
+      credit_note: "CreditNote",
+      billing_entity: "BillingEntity",
+      subscription: "Subscription",
+      wallet: "Wallet",
+      coupon: "Coupon",
+      payment_request: "PaymentRequest"
+    }.freeze
+
     ACTIVITY_TYPES = {
       billable_metric_created: "billable_metric.created",
       billable_metric_updated: "billable_metric.updated",
@@ -21,6 +50,7 @@ module Clickhouse
       invoice_drafted: "invoice.drafted",
       invoice_failed: "invoice.failed",
       invoice_created: "invoice.created",
+      invoice_one_off_created: "invoice.one_off_created",
       invoice_paid_credit_added: "invoice.paid_credit_added",
       invoice_generated: "invoice.generated",
       invoice_payment_status_updated: "invoice.payment_status_updated",
@@ -48,25 +78,22 @@ module Clickhouse
       coupon_updated: "coupon.updated",
       coupon_deleted: "coupon.deleted",
       applied_coupon_created: "applied_coupon.created",
-      applied_coupon_deleted: "applied_coupon.deleted"
+      applied_coupon_deleted: "applied_coupon.deleted",
+      payment_request_created: "payment_request.created"
     }
 
     before_save :ensure_activity_id
 
-    def user
-      organization.users.find_by(id: user_id)
-    end
+    # TODO: Remove this once we have soft deletion everywhere
+    def resource
+      return nil if resource_type.blank? || resource_id.blank?
 
-    def api_key
-      organization.api_keys.find_by(id: api_key_id)
-    end
-
-    def customer
-      organization.customers.find_by(external_id: external_customer_id)
-    end
-
-    def subscription
-      organization.subscriptions.find_by(external_id: external_subscription_id)
+      klass = resource_type.safe_constantize
+      if RESOURCE_TYPES_WITH_DISCARDED.include?(resource_type)
+        klass.with_discarded.find_by(organization_id: organization.id, id: resource_id)
+      else
+        klass.find_by(organization_id: organization.id, id: resource_id)
+      end
     end
 
     private

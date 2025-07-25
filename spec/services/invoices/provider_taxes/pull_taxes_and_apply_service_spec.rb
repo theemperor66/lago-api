@@ -15,6 +15,7 @@ RSpec.describe Invoices::ProviderTaxes::PullTaxesAndApplyService, type: :service
         :invoice,
         :pending,
         :with_tax_error,
+        :with_subscriptions,
         customer:,
         billing_entity:,
         organization:,
@@ -98,8 +99,10 @@ RSpec.describe Invoices::ProviderTaxes::PullTaxesAndApplyService, type: :service
 
       integration_customer_tax
 
-      allow(LagoHttpClient::Client).to receive(:new).with(endpoint).and_return(lago_client)
-      allow(LagoHttpClient::Client).to receive(:new).with(endpoint_draft).and_return(lago_client)
+      allow(LagoHttpClient::Client).to receive(:new)
+        .with(endpoint, retries_on: [OpenSSL::SSL::SSLError])
+        .and_return(lago_client)
+      allow(LagoHttpClient::Client).to receive(:new).with(endpoint_draft, retries_on: [OpenSSL::SSL::SSLError]).and_return(lago_client)
       allow(lago_client).to receive(:post_with_response).and_return(response)
       allow(response).to receive(:body).and_return(body)
     end
@@ -196,6 +199,12 @@ RSpec.describe Invoices::ProviderTaxes::PullTaxesAndApplyService, type: :service
         expect do
           pull_taxes_service.call
         end.to have_enqueued_job(SendWebhookJob).with("invoice.created", Invoice)
+      end
+
+      it "produces an activity log" do
+        described_class.call(invoice:)
+
+        expect(Utils::ActivityLog).to have_produced("invoice.created").with(invoice)
       end
 
       it "enqueues GeneratePdfAndNotifyJob with email false" do

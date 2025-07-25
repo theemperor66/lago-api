@@ -7,6 +7,11 @@ module Plans
       super
     end
 
+    activity_loggable(
+      action: "plan.deleted",
+      record: -> { plan }
+    )
+
     def call
       return result.not_found_failure!(resource: "plan") unless plan
 
@@ -21,6 +26,9 @@ module Plans
       # NOTE: Finalize all draft invoices.
       invoices = Invoice.draft.joins(:plans).where(plans: {id: plan.id}).distinct
       invoices.find_each { |invoice| Invoices::RefreshDraftAndFinalizeService.call(invoice:) }
+
+      plan.entitlement_values.discard_all!
+      plan.entitlements.discard_all!
 
       plan.pending_deletion = false
       plan.discard!

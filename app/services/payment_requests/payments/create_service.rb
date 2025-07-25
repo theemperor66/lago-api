@@ -39,7 +39,8 @@ module PaymentRequests
           payment_provider_customer_id: current_payment_provider_customer.id,
           amount_cents: payable.total_amount_cents,
           amount_currency: payable.currency,
-          status: "pending"
+          status: "pending",
+          customer_id: payable.customer_id
         ).find_or_create_by!(
           payable:,
           payable_payment_status: "pending"
@@ -101,8 +102,9 @@ module PaymentRequests
       def should_process_payment?
         return false if payable.payment_succeeded?
         return false if current_payment_provider.blank?
+        return false unless current_payment_provider_customer&.provider_customer_id
 
-        current_payment_provider_customer&.provider_customer_id
+        payable.invoices.all?(&:ready_for_payment_processing)
       end
 
       def current_payment_provider

@@ -165,6 +165,16 @@ RSpec.describe Payments::ManualCreateService, type: :service do
           result = service.call
 
           expect(result.payment.payable.payment_status).to eq("succeeded")
+          expect(SendWebhookJob).to have_been_enqueued.with(
+            "invoice.payment_status_updated",
+            invoice
+          )
+        end
+
+        it "produces an activity log" do
+          payment = described_class.call(organization:, params:).payment
+
+          expect(Utils::ActivityLog).to have_produced("payment.recorded").after_commit.with(payment)
         end
 
         context "when issue_receipts_enabled is true" do

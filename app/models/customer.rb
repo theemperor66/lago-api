@@ -63,23 +63,30 @@ class Customer < ApplicationRecord
   has_many :applied_taxes, class_name: "Customer::AppliedTax", dependent: :destroy
   has_many :taxes, through: :applied_taxes
 
-  has_many :invoice_custom_section_selections
-  has_many :selected_invoice_custom_sections, through: :invoice_custom_section_selections, source: :invoice_custom_section
+  has_many :applied_invoice_custom_sections,
+    class_name: "Customer::AppliedInvoiceCustomSection",
+    dependent: :destroy
+  has_many :selected_invoice_custom_sections, through: :applied_invoice_custom_sections, source: :invoice_custom_section
   has_many :manual_selected_invoice_custom_sections,
     -> { where(section_type: :manual) },
-    through: :invoice_custom_section_selections,
+    through: :applied_invoice_custom_sections,
     source: :invoice_custom_section
   has_many :system_generated_invoice_custom_sections,
     -> { where(section_type: :system_generated) },
-    through: :invoice_custom_section_selections,
+    through: :applied_invoice_custom_sections,
     source: :invoice_custom_section
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    foreign_key: :external_customer_id,
+    primary_key: :external_id
 
   has_one :stripe_customer, class_name: "PaymentProviderCustomers::StripeCustomer"
   has_one :gocardless_customer, class_name: "PaymentProviderCustomers::GocardlessCustomer"
   has_one :cashfree_customer, class_name: "PaymentProviderCustomers::CashfreeCustomer"
   has_one :adyen_customer, class_name: "PaymentProviderCustomers::AdyenCustomer"
+  has_one :flutterwave_customer, class_name: "PaymentProviderCustomers::FlutterwaveCustomer"
   has_one :netsuite_customer, class_name: "IntegrationCustomers::NetsuiteCustomer"
   has_one :anrok_customer, class_name: "IntegrationCustomers::AnrokCustomer"
   has_one :avalara_customer, class_name: "IntegrationCustomers::AvalaraCustomer"
@@ -88,7 +95,7 @@ class Customer < ApplicationRecord
   has_one :salesforce_customer, class_name: "IntegrationCustomers::SalesforceCustomer"
   has_one :moneyhash_customer, class_name: "PaymentProviderCustomers::MoneyhashCustomer"
 
-  PAYMENT_PROVIDERS = %w[stripe gocardless cashfree adyen moneyhash].freeze
+  PAYMENT_PROVIDERS = %w[stripe gocardless cashfree adyen flutterwave moneyhash].freeze
 
   default_scope -> { kept }
   sequenced scope: ->(customer) { customer.organization.customers.with_discarded },
@@ -109,10 +116,14 @@ class Customer < ApplicationRecord
   validates :net_payment_term, numericality: {greater_than_or_equal_to: 0}, allow_nil: true
   validates :payment_provider, inclusion: {in: PAYMENT_PROVIDERS}, allow_nil: true
   validates :timezone, timezone: true, allow_nil: true
-  validates :email, email: true, if: :email?
+  validates :email, email: true, if: -> { email? && will_save_change_to_email? }
 
   def self.ransackable_attributes(_auth_object = nil)
     %w[id name firstname lastname legal_name external_id email]
+  end
+
+  def self.ransackable_associations(_auth_object = nil)
+    []
   end
 
   def display_name(prefer_legal_name: true)
@@ -157,20 +168,17 @@ class Customer < ApplicationRecord
   # - plus any system-generated sections
   # These are the ones that will actually appear on the invoice.
   def applicable_invoice_custom_sections
-    manual_ids = configurable_invoice_custom_sections.map(&:id)
-    system_ids = system_generated_invoice_custom_sections.ids
-
-    InvoiceCustomSection.where(id: manual_ids + system_ids)
+    InvoiceCustomSection.where(id: configurable_invoice_custom_sections)
+      .or(InvoiceCustomSection.where(id: system_generated_invoice_custom_sections))
   end
 
-  # TODO: migrate invoice custom sections to Billing Entities
   # `configurable_invoice_custom_sections` are manually selected sections:
   # - either directly configured on the customer
-  # - or fallback to selections at the organization level if none on the customer
+  # - or fallback to selections at the billing entity level if none on the customer
   def configurable_invoice_custom_sections
-    return [] if skip_invoice_custom_sections?
+    return InvoiceCustomSection.none if skip_invoice_custom_sections?
 
-    manual_selected_invoice_custom_sections.order(:name).presence || organization.selected_invoice_custom_sections.order(:name)
+    manual_selected_invoice_custom_sections.order(:name).presence || billing_entity.selected_invoice_custom_sections.order(:name)
   end
 
   def editable?
@@ -195,6 +203,8 @@ class Customer < ApplicationRecord
       gocardless_customer
     when :cashfree
       cashfree_customer
+    when :flutterwave
+      flutterwave_customer
     when :adyen
       adyen_customer
     when :moneyhash

@@ -9,15 +9,20 @@ RSpec.describe Plans::CreateService, type: :service do
   let(:organization) { membership.organization }
 
   describe "create" do
+    subject(:result) { plans_service.call }
+
     let(:plan_name) { "Some plan name" }
     let(:plan_invoice_display_name) { "Some plan invoice name" }
     let(:billable_metric) { create(:billable_metric, organization:) }
     let(:sum_billable_metric) { create(:sum_billable_metric, organization:, recurring: true) }
+    let(:plan_tax) { create(:tax, organization:) }
+    let(:charge_tax) { create(:tax, organization:) }
+    let(:pricing_unit) { create(:pricing_unit, organization:) }
+
     let(:billable_metric_filter) do
       create(:billable_metric_filter, billable_metric:, key: "payment_method", values: %w[card physical])
     end
-    let(:plan_tax) { create(:tax, organization:) }
-    let(:charge_tax) { create(:tax, organization:) }
+
     let(:create_args) do
       {
         name: plan_name,
@@ -49,6 +54,7 @@ RSpec.describe Plans::CreateService, type: :service do
     let(:charges_args) do
       [
         {
+          applied_pricing_unit: applied_pricing_unit_args,
           billable_metric_id: billable_metric.id,
           charge_model: "standard",
           min_amount_cents: 100,
@@ -62,6 +68,7 @@ RSpec.describe Plans::CreateService, type: :service do
           ]
         },
         {
+          applied_pricing_unit: applied_pricing_unit_args,
           billable_metric_id: sum_billable_metric.id,
           charge_model: "graduated",
           pay_in_advance: true,
@@ -84,6 +91,13 @@ RSpec.describe Plans::CreateService, type: :service do
           }
         }
       ]
+    end
+
+    let(:applied_pricing_unit_args) do
+      {
+        code: pricing_unit.code,
+        conversion_rate: rand(0.1..5.0)
+      }
     end
 
     let(:usage_thresholds_args) do
@@ -113,6 +127,7 @@ RSpec.describe Plans::CreateService, type: :service do
         .to change(Plan, :count).by(1)
 
       plan = Plan.order(:created_at).last
+      expect(SendWebhookJob).to have_been_enqueued.with("plan.created", plan)
       expect(plan.taxes.pluck(:code)).to eq([plan_tax.code])
       expect(plan.invoice_display_name).to eq(plan_invoice_display_name)
     end
@@ -132,6 +147,10 @@ RSpec.describe Plans::CreateService, type: :service do
         plan = Plan.order(:created_at).last
 
         expect(plan.usage_thresholds.count).to eq(0)
+      end
+
+      it "does not create applied pricing units" do
+        expect { result }.not_to change(AppliedPricingUnit, :count)
       end
     end
 
@@ -159,11 +178,41 @@ RSpec.describe Plans::CreateService, type: :service do
           plan = Plan.order(:created_at).last
           usage_thresholds = plan.usage_thresholds.order(threshold_display_name: :asc)
 
-          aggregate_failures do
-            expect(plan.usage_thresholds.count).to eq(3)
-            expect(usage_thresholds.first).to have_attributes(amount_cents: 1_000)
-            expect(usage_thresholds.second).to have_attributes(amount_cents: 10_000)
-            expect(usage_thresholds.third).to have_attributes(amount_cents: 100)
+          expect(plan.usage_thresholds.count).to eq(3)
+          expect(usage_thresholds.first).to have_attributes(amount_cents: 1_000)
+          expect(usage_thresholds.second).to have_attributes(amount_cents: 10_000)
+          expect(usage_thresholds.third).to have_attributes(amount_cents: 100)
+        end
+      end
+
+      context "when applied pricing params provided" do
+        context "when params are valid" do
+          it "creates applied pricing units" do
+            expect { result }.to change(AppliedPricingUnit, :count).by(2)
+          end
+        end
+
+        context "when params are invalid" do
+          let(:applied_pricing_unit_args) do
+            {code: "non-existing-code"}
+          end
+
+          it "fails with a validation error" do
+            expect(result).to be_failure
+            expect(result.error).to be_a(BaseService::ValidationFailure)
+
+            expect(result.error.messages).to match(
+              conversion_rate: ["value_is_mandatory", "is not a number"],
+              pricing_unit: ["relation_must_exist"]
+            )
+          end
+
+          it "does not create applied pricing unit" do
+            expect { result }.not_to change(AppliedPricingUnit, :count)
+          end
+
+          it "does not create plan" do
+            expect { result }.not_to change(Plan, :count)
           end
         end
       end
@@ -228,6 +277,12 @@ RSpec.describe Plans::CreateService, type: :service do
           parent_id: nil
         }
       )
+    end
+
+    it "produces an activity log" do
+      result = described_class.call(create_args)
+
+      expect(Utils::ActivityLog).to have_produced("plan.created").after_commit.with(result.plan)
     end
 
     context "when premium" do
@@ -314,13 +369,9 @@ RSpec.describe Plans::CreateService, type: :service do
       let(:plan_name) { nil }
 
       it "returns an error" do
-        result = plans_service.call
-
-        aggregate_failures do
-          expect(result).not_to be_success
-          expect(result.error).to be_a(BaseService::ValidationFailure)
-          expect(result.error.messages[:name]).to eq(["value_is_mandatory"])
-        end
+        expect(result).not_to be_success
+        expect(result.error).to be_a(BaseService::ValidationFailure)
+        expect(result.error.messages[:name]).to eq(["value_is_mandatory"])
       end
 
       context "with premium charge model" do
@@ -333,7 +384,7 @@ RSpec.describe Plans::CreateService, type: :service do
               pay_in_advance: true,
               invoiceable: false,
               properties: {
-                graduated_ranges: [
+                graduated_percentage_ranges: [
                   {
                     from_value: 0,
                     to_value: 10,
@@ -353,13 +404,9 @@ RSpec.describe Plans::CreateService, type: :service do
         end
 
         it "returns an error" do
-          result = plans_service.call
-
-          aggregate_failures do
-            expect(result).not_to be_success
-            expect(result.error).to be_a(BaseService::ValidationFailure)
-            expect(result.error.messages[:charge_model]).to eq(["value_is_mandatory"])
-          end
+          expect(result).not_to be_success
+          expect(result.error).to be_a(BaseService::ValidationFailure)
+          expect(result.error.messages[:charge_model]).to eq(["graduated_percentage_requires_premium_license"])
         end
       end
     end
@@ -368,8 +415,6 @@ RSpec.describe Plans::CreateService, type: :service do
       let(:billable_metric) { create(:billable_metric) }
 
       it "returns an error" do
-        result = plans_service.call
-
         expect(result).not_to be_success
         expect(result.error.error_code).to eq("billable_metrics_not_found")
       end

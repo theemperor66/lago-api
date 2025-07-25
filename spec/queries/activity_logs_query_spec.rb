@@ -24,7 +24,10 @@ RSpec.describe ActivityLogsQuery, type: :query, clickhouse: true do
 
   context "with old activity logs" do
     let(:old_activity_log) do
-      create(:clickhouse_activity_log, organization_id: organization.id, logged_at: (ActivityLogsQuery::MAX_AGE + 3.days).ago)
+      create(:clickhouse_activity_log,
+        organization: organization,
+        resource: activity_log.resource,
+        logged_at: (ActivityLogsQuery::MAX_AGE + 3.days).ago)
     end
 
     before do
@@ -60,6 +63,26 @@ RSpec.describe ActivityLogsQuery, type: :query, clickhouse: true do
       expect(described_class.call(organization:, pagination:, filters:).activity_logs.first.activity_id).to eq(activity_log.activity_id)
 
       filters = {to_date: activity_log.logged_at - 1.day}
+      expect(described_class.call(organization:, pagination:, filters:).activity_logs).to be_empty
+    end
+  end
+
+  context "with api_key_ids filter" do
+    it "returns expected activity logs" do
+      filters = {api_key_ids: [activity_log.api_key_id]}
+      expect(described_class.call(organization:, pagination:, filters:).activity_logs.first.activity_id).to eq(activity_log.activity_id)
+
+      filters = {api_key_ids: ["other"]}
+      expect(described_class.call(organization:, pagination:, filters:).activity_logs).to be_empty
+    end
+  end
+
+  context "with activity_ids filter" do
+    it "returns expected activity logs" do
+      filters = {activity_ids: [activity_log.activity_id]}
+      expect(described_class.call(organization:, pagination:, filters:).activity_logs.first.activity_id).to eq(activity_log.activity_id)
+
+      filters = {activity_ids: ["other"]}
       expect(described_class.call(organization:, pagination:, filters:).activity_logs).to be_empty
     end
   end
@@ -132,5 +155,16 @@ RSpec.describe ActivityLogsQuery, type: :query, clickhouse: true do
       filters = {resource_types: ["other"]}
       expect(described_class.call(organization:, pagination:, filters:).activity_logs).to be_empty
     end
+  end
+
+  context "when activty logs are not available" do
+    before do
+      ENV["LAGO_CLICKHOUSE_ENABLED"] = nil
+    end
+
+    it { expect(result).not_to be_success }
+    it { expect(result).to be_failure }
+    it { expect(result.error).to be_a(BaseService::ForbiddenFailure) }
+    it { expect(result.error.code).to eq("feature_unavailable") }
   end
 end

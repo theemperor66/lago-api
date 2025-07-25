@@ -2,11 +2,20 @@
 
 module Subscriptions
   class UpdateService < BaseService
+    Result = BaseResult[:subscription]
+
     def initialize(subscription:, params:)
       @subscription = subscription
       @params = params
       super
     end
+
+    activity_loggable(
+      action: "subscription.updated",
+      record: -> { subscription },
+      condition: -> { !subscription&.starting_in_the_future? },
+      after_commit: true
+    )
 
     def call
       return result.not_found_failure!(resource: "subscription") unless subscription
@@ -14,7 +23,9 @@ module Subscriptions
         customer: subscription.customer,
         plan: subscription.plan,
         subscription_at: params.key?(:subscription_at) ? params[:subscription_at] : subscription.subscription_at,
-        ending_at: params[:ending_at]
+        ending_at: params[:ending_at],
+        on_termination_credit_note: params[:on_termination_credit_note],
+        on_termination_invoice: params[:on_termination_invoice]
       )
         return result
       end
@@ -22,6 +33,14 @@ module Subscriptions
 
       subscription.name = params[:name] if params.key?(:name)
       subscription.ending_at = params[:ending_at] if params.key?(:ending_at)
+
+      if pay_in_advance? && params.key?(:on_termination_credit_note)
+        subscription.on_termination_credit_note = params[:on_termination_credit_note]
+      end
+
+      if params.key?(:on_termination_invoice)
+        subscription.on_termination_invoice = params[:on_termination_invoice]
+      end
 
       if params.key?(:plan_overrides)
         plan_result = handle_plan_override
@@ -37,10 +56,10 @@ module Subscriptions
       else
         subscription.save!
 
-        after_commit { SendWebhookJob.perform_later("subscription.updated", subscription) }
+        SendWebhookJob.perform_after_commit("subscription.updated", subscription)
 
         if subscription.should_sync_hubspot_subscription?
-          Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_later(subscription:)
+          Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_after_commit(subscription:)
         end
       end
 
@@ -54,6 +73,10 @@ module Subscriptions
 
     attr_reader :subscription, :params
 
+    def pay_in_advance?
+      subscription.plan.pay_in_advance?
+    end
+
     def process_subscription_at_change(subscription)
       if subscription.subscription_at <= Time.current
         subscription.mark_as_active!(subscription.subscription_at)
@@ -63,7 +86,7 @@ module Subscriptions
 
       return unless subscription.plan.pay_in_advance? && subscription.subscription_at.today?
 
-      BillSubscriptionJob.perform_later([subscription], Time.current.to_i, invoicing_reason: :subscription_starting)
+      BillSubscriptionJob.perform_after_commit([subscription], Time.current.to_i, invoicing_reason: :subscription_starting)
     end
 
     def handle_plan_override

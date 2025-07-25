@@ -44,11 +44,9 @@ module Charges
     def aggregation_filters
       filters = {event:}
 
-      properties = charge_filter&.properties || charge.properties
-      if charge.supports_grouped_by? && properties["grouped_by"].present?
-        filters[:grouped_by_values] = properties["grouped_by"].index_with do |grouped_by|
-          event.properties[grouped_by]
-        end
+      model = charge_filter.presence || charge
+      if model.pricing_group_keys.present?
+        filters[:grouped_by_values] = model.pricing_group_keys.index_with { event.properties[it] }
       end
 
       if charge_filter.present?

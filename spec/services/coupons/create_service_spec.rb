@@ -32,6 +32,12 @@ RSpec.describe Coupons::CreateService, type: :service do
         .to change(Coupon, :count).by(1)
     end
 
+    it "produces an activity log" do
+      coupon = described_class.call(create_args).coupon
+
+      expect(Utils::ActivityLog).to have_produced("coupon.created").after_commit.with(coupon)
+    end
+
     context "with code already used by a deleted coupon" do
       it "creates an coupon with the same code" do
         create(:coupon, :deleted, organization:, code: coupon_code)

@@ -11,6 +11,7 @@ module V1
             units: fees.map { |f| BigDecimal(f.units) }.sum.to_s,
             events_count: fees.sum(0) { |f| f.events_count.to_i },
             amount_cents: fees.sum(&:amount_cents),
+            pricing_unit_details: pricing_unit_details(fees),
             amount_currency: fee.amount_currency,
             charge: {
               lago_id: charge_id,
@@ -34,13 +35,14 @@ module V1
       def filters(fees)
         return [] unless fees.first.charge&.filters&.any?
 
-        fees.sort_by { |f| f.charge_filter&.display_name.to_s }.map do |f|
+        fees.group_by { |f| f.charge_filter&.id }.values.map do |grouped_fees|
           {
-            units: f.units,
-            amount_cents: f.amount_cents,
-            events_count: f.events_count,
-            invoice_display_name: f.charge_filter&.invoice_display_name,
-            values: f.charge_filter&.to_h
+            units: grouped_fees.map { |f| BigDecimal(f.units) }.sum.to_s,
+            amount_cents: grouped_fees.sum(&:amount_cents),
+            pricing_unit_details: pricing_unit_details(grouped_fees),
+            events_count: grouped_fees.sum(&:events_count),
+            invoice_display_name: grouped_fees.first.charge_filter&.invoice_display_name,
+            values: grouped_fees.first.charge_filter&.to_h
           }
         end.compact
       end
@@ -51,12 +53,24 @@ module V1
         fees.group_by(&:grouped_by).values.map do |grouped_fees|
           {
             amount_cents: grouped_fees.sum(&:amount_cents),
+            pricing_unit_details: pricing_unit_details(grouped_fees),
             events_count: grouped_fees.sum(&:events_count),
             units: grouped_fees.map { |f| BigDecimal(f.units) }.sum.to_s,
             grouped_by: grouped_fees.first.grouped_by,
             filters: filters(grouped_fees)
           }
         end
+      end
+
+      def pricing_unit_details(fees)
+        fee = fees.first
+        return if fee.pricing_unit_usage.nil?
+
+        {
+          amount_cents: fees.map(&:pricing_unit_usage).sum(&:amount_cents),
+          short_name: fee.pricing_unit_usage.short_name,
+          conversion_rate: fee.pricing_unit_usage.conversion_rate
+        }
       end
     end
   end

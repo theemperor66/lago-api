@@ -6,7 +6,7 @@ class PaymentRequest
 
     belongs_to :invoice
     belongs_to :payment_request
-    belongs_to :organization, optional: true
+    belongs_to :organization
   end
 end
 
@@ -18,7 +18,7 @@ end
 #  created_at         :datetime         not null
 #  updated_at         :datetime         not null
 #  invoice_id         :uuid             not null
-#  organization_id    :uuid
+#  organization_id    :uuid             not null
 #  payment_request_id :uuid             not null
 #
 # Indexes

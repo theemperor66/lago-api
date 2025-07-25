@@ -65,6 +65,7 @@ Rails.application.console do
       invoice.taxes.destroy_all
       invoice.credits.destroy_all
       invoice.applied_invoice_custom_sections.destroy_all
+      invoice.payments.destroy_all
       invoice.destroy!
     end
 
@@ -90,5 +91,17 @@ Rails.application.console do
 
     puts "Organization `#{org_name}` created with admin invite: #{result.invite_url}" # rubocop:disable Rails/Output
     {organization:, invite_url: result.invite_url}
+  end
+
+  # Often this procedure is called "regenerate invoice"
+  def delete_invoice_pdf(id)
+    inv = Invoice.find(id)
+    puts "Going to delete invoice pdf from org `#{inv.organization.name}` (id: #{inv.id})" # rubocop:disable Rails/Output
+    unless inv.finalized?
+      puts "Invoice is not finalized. Skipping." # rubocop:disable Rails/Output
+      return
+    end
+
+    inv.file&.destroy
   end
 end

@@ -12,7 +12,7 @@ module PaymentProviderCustomers
 
     belongs_to :customer
     belongs_to :payment_provider, optional: true, class_name: "PaymentProviders::BaseProvider"
-    belongs_to :organization, optional: true
+    belongs_to :organization
 
     has_many :payments
     has_many :refunds, foreign_key: :payment_provider_customer_id
@@ -48,7 +48,7 @@ end
 #  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #  customer_id          :uuid             not null
-#  organization_id      :uuid
+#  organization_id      :uuid             not null
 #  payment_provider_id  :uuid
 #  provider_customer_id :string
 #

@@ -44,6 +44,12 @@ RSpec.describe Coupons::UpdateService, type: :service do
       end
     end
 
+    it "produces an activity log" do
+      described_class.call(coupon:, params:)
+
+      expect(Utils::ActivityLog).to have_produced("coupon.updated").after_commit.with(coupon)
+    end
+
     context "with validation error" do
       let(:name) { nil }
 

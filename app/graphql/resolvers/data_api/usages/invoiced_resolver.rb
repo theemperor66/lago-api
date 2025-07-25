@@ -26,10 +26,13 @@ module Resolvers
         argument :external_subscription_id, String, required: false
 
         argument :billable_metric_code, String, required: false
+        argument :billing_entity_code, String, required: false
         argument :plan_code, String, required: false
 
         argument :filter_values, String, required: false
         argument :grouped_by, String, required: false
+
+        argument :is_customer_tin_empty, Boolean, required: false
 
         type Types::DataApi::Usages::Invoiced::Object.collection_type, null: false
 

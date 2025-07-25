@@ -18,10 +18,11 @@ module CreditNotes
         adyen_result = create_adyen_refund
 
         refund = Refund.new(
+          organization_id: credit_note.organization_id,
           credit_note:,
           payment:,
           payment_provider: payment.payment_provider,
-          payment_provider_customer: payment.payment_provider_customer,
+          payment_provider_customer: payment_provider_customer(customer),
           amount_cents: adyen_result.response.dig("amount", "value"),
           amount_currency: adyen_result.response.dig("amount", "currency"),
           status: "pending",
@@ -50,6 +51,7 @@ module CreditNotes
 
         if status.to_sym == :failed
           deliver_error_webhook(message: "Payment refund failed", code: nil)
+          Utils::ActivityLog.produce(credit_note, "credit_note.refund_failure")
           result.service_failure!(code: "refund_failed", message: "Refund failed to perform")
         end
 
@@ -94,6 +96,7 @@ module CreditNotes
       rescue Adyen::AdyenError => e
         deliver_error_webhook(message: e.msg, code: e.code)
         update_credit_note_status(:failed)
+        Utils::ActivityLog.produce(credit_note, "credit_note.refund_failure")
 
         raise
       end
@@ -113,7 +116,7 @@ module CreditNotes
         SendWebhookJob.perform_later(
           "credit_note.provider_refund_failure",
           credit_note,
-          provider_customer_id: customer.adyen_customer.provider_customer_id,
+          provider_customer_id: payment_provider_customer(customer)&.provider_customer_id,
           provider_error: {
             message:,
             error_code: code

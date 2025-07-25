@@ -46,6 +46,22 @@ RSpec.describe Invoices::Payments::RetryService, type: :service do
       end
     end
 
+    Invoices::Payments::RetryService::WEBHOOK_TYPE.each_pair do |type, action|
+      next if type == "add_on"
+
+      context "with invoice type #{type}" do
+        let(:invoice) do
+          create(:invoice, customer:, organization: customer.organization, invoice_type: type)
+        end
+
+        it "produces an activity log" do
+          described_class.call(invoice:)
+
+          expect(Utils::ActivityLog).to have_produced(action).with(invoice)
+        end
+      end
+    end
+
     context "with gocardless payment provider" do
       let(:payment_provider) { "gocardless" }
 

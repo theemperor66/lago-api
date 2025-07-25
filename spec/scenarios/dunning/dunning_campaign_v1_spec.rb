@@ -8,12 +8,12 @@ describe "Dunning Campaign v1", :scenarios, type: :request do
   end
 
   let(:billing_entity) do
-    create(:billing_entity, organization:, name: "ACME Corp", email_settings: [])
+    create(:billing_entity, organization:, name: "ACME Corp", email_settings: [], applied_dunning_campaign: dunning_campaign)
   end
 
   let(:dunning_campaign) do
     create(:dunning_campaign, organization:,
-      applied_to_organization: true, max_attempts: 2, days_between_attempts: 2)
+      max_attempts: 2, days_between_attempts: 2)
   end
   let(:dunning_campaign_threshold) do
     create(:dunning_campaign_threshold, dunning_campaign:, amount_cents: 150_00, currency: "EUR")
@@ -41,28 +41,6 @@ describe "Dunning Campaign v1", :scenarios, type: :request do
 
   let(:webhooks_sent) { [] }
 
-  let(:stripe_customer_response) do
-    File.read("spec/fixtures/stripe/customer_retrieve_response.json")
-  end
-  let(:stripe_payment_method_response) do
-    JSON.parse(
-      File.read("spec/fixtures/stripe/retrieve_payment_method.json"),
-      symbolize_names: true
-    ).merge!({
-      id: stripe_pm_id,
-      customer: stripe_cus_id
-    })
-  end
-  let(:stripe_payment_intent_response) do
-    File.read("spec/fixtures/stripe/payment_intent_failed_card_declined.json")
-  end
-
-  def build_stripe_payment_intent_response
-    JSON.parse(stripe_payment_intent_response, symbolize_names: true).tap do |h|
-      h[:error][:payment_intent][:id] = "pi_#{SecureRandom.hex}"
-    end
-  end
-
   include_context "with webhook tracking"
 
   # TODO: make it a test metadata `:scenarios, type: :request, premium: true`
@@ -74,13 +52,22 @@ describe "Dunning Campaign v1", :scenarios, type: :request do
     dunning_campaign_threshold
 
     stub_request(:get, "https://api.stripe.com/v1/customers/#{stripe_customer.provider_customer_id}")
-      .and_return(status: 200, body: stripe_customer_response)
+      .and_return(status: 200, body: get_stripe_fixtures("customer_retrieve_response.json") do |h|
+        h[:invoice_settings][:default_payment_method] = stripe_pm_id
+      end)
     stub_request(:get, "https://api.stripe.com/v1/customers/#{stripe_customer.provider_customer_id}/payment_methods/pm_123456")
-      .and_return(status: 200, body: stripe_payment_method_response.to_json)
+      .and_return(status: 200, body: get_stripe_fixtures("retrieve_payment_method_response.json") do |h|
+        h[:id] = stripe_pm_id
+        h[:customer] = stripe_cus_id
+      end)
     stub_request(:post, "https://api.stripe.com/v1/payment_intents")
       .and_return(
         status: 402,
-        body: lambda { |_req| build_stripe_payment_intent_response.to_json }
+        body: lambda { |_req|
+          get_stripe_fixtures("payment_intent_card_declined_response.json") do |h|
+            h[:error][:payment_intent][:id] = "pi_#{SecureRandom.hex}"
+          end
+        }
       )
     stub_request(:post, "https://api.stripe.com/v1/checkout/sessions")
       .and_return(status: 200, body: {url: "https://stripe.com/checkout/session/cs_test_123"}.to_json)

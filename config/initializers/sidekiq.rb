@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "socket"
+require "sidekiq/middleware/current_attributes"
 
 LIVENESS_PORT = 8080
 
@@ -31,7 +32,7 @@ Sidekiq.configure_server do |config|
   config.on(:startup) do
     Sidekiq.logger.info "Starting liveness server on #{LIVENESS_PORT}"
     Thread.start do
-      server = TCPServer.new("localhost", LIVENESS_PORT)
+      server = TCPServer.new("0.0.0.0", LIVENESS_PORT)
       loop do
         Thread.start(server.accept) do |socket|
           request = socket.gets
@@ -75,3 +76,5 @@ Sidekiq.configure_client do |config|
   config.logger = Sidekiq::Logger.new($stdout)
   config.logger.formatter = Sidekiq::Logger::Formatters::JSON.new
 end
+
+Sidekiq::CurrentAttributes.persist("CurrentContext")

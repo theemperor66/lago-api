@@ -7,7 +7,7 @@ class AdjustedFee < ApplicationRecord
   belongs_to :charge, optional: true
   belongs_to :group, optional: true
   belongs_to :charge_filter, optional: true
-  belongs_to :organization, optional: true
+  belongs_to :organization
 
   ADJUSTED_FEE_TYPES = [
     :adjusted_units,
@@ -42,7 +42,7 @@ end
 #  fee_id                    :uuid
 #  group_id                  :uuid
 #  invoice_id                :uuid             not null
-#  organization_id           :uuid
+#  organization_id           :uuid             not null
 #  subscription_id           :uuid
 #
 # Indexes

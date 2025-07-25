@@ -38,6 +38,8 @@ module Invoices
       result.usage = compute_usage
       result.invoice = invoice
       result
+    rescue BaseService::ThrottlingError => error
+      result.too_many_provider_requests_failure!(provider_name: error.provider_name, error:)
     end
 
     private
@@ -96,8 +98,7 @@ module Invoices
         subscription:,
         charge:,
         to_datetime: boundaries[:charges_to_datetime],
-        # NOTE: Will be turned on for clickhouse in the future
-        cache: organization.clickhouse_events_store? ? false : with_cache
+        cache: with_cache
       )
 
       applied_boundaries = boundaries
@@ -187,7 +188,7 @@ module Invoices
     end
 
     def customer_provider_taxation?
-      @customer_provider_taxation ||= invoice.customer.anrok_customer
+      @customer_provider_taxation ||= invoice.customer.tax_customer
     end
   end
 end

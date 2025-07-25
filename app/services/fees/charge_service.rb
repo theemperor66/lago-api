@@ -29,18 +29,13 @@ module Fees
       return result if current_usage
 
       if invoice.nil? || !invoice.progressive_billing?
-        init_true_up_fee(
-          fee: result.fees.find { |f| f.charge_filter_id.nil? },
-          amount_cents: result.fees.sum(&:amount_cents),
-          precise_amount_cents: result.fees.sum(&:precise_amount_cents)
-        )
+        init_true_up_fee
       end
       return result unless result.success?
 
       ActiveRecord::Base.transaction do
-        result.fees.reject! { |f| !should_persit_fee?(f, result.fees) }
-
-        return result if context == :invoice_preview
+        result.fees.reject! { |f| !should_persist_fee?(f, result.fees) }
+        next if context == :invoice_preview
 
         result.fees.each do |fee|
           fee.save!
@@ -122,10 +117,24 @@ module Fees
 
       # NOTE: amount_result should be a BigDecimal, we need to round it
       # to the currency decimals and transform it into currency cents
-      rounded_amount = amount_result.amount.round(currency.exponent)
-      amount_cents = rounded_amount * currency.subunit_to_unit
-      precise_amount_cents = amount_result.amount * currency.subunit_to_unit.to_d
-      unit_amount_cents = amount_result.unit_amount * currency.subunit_to_unit
+      if charge.applied_pricing_unit
+        pricing_unit_usage = PricingUnitUsage.build_from_fiat_amounts(
+          amount: amount_result.amount,
+          unit_amount: amount_result.unit_amount,
+          applied_pricing_unit: charge.applied_pricing_unit
+        )
+
+        amount_cents, precise_amount_cents, unit_amount_cents, precise_unit_amount = pricing_unit_usage
+          .to_fiat_currency_cents(currency)
+          .values_at(:amount_cents, :precise_amount_cents, :unit_amount_cents, :precise_unit_amount)
+      else
+        pricing_unit_usage = nil
+        rounded_amount = amount_result.amount.round(currency.exponent)
+        amount_cents = rounded_amount * currency.subunit_to_unit
+        precise_amount_cents = amount_result.amount * currency.subunit_to_unit.to_d
+        unit_amount_cents = amount_result.unit_amount * currency.subunit_to_unit
+        precise_unit_amount = amount_result.unit_amount
+      end
 
       units = if current_usage && (charge.pay_in_advance? || charge.prorated?)
         amount_result.current_usage_units
@@ -155,10 +164,11 @@ module Fees
         taxes_amount_cents: 0,
         taxes_precise_amount_cents: 0.to_d,
         unit_amount_cents:,
-        precise_unit_amount: amount_result.unit_amount,
+        precise_unit_amount:,
         amount_details: amount_result.amount_details,
         grouped_by: amount_result.grouped_by || {},
-        charge_filter_id: charge_filter&.id
+        charge_filter_id: charge_filter&.id,
+        pricing_unit_usage:
       )
 
       unless charge.invoiceable?
@@ -177,7 +187,7 @@ module Fees
       new_fee
     end
 
-    def should_persit_fee?(fee, fees)
+    def should_persist_fee?(fee, fees)
       return true if context == :recurring
       return true if organization.zero_amount_fees_enabled?
       return true if fee.units != 0 || fee.amount_cents != 0 || fee.events_count != 0
@@ -214,8 +224,18 @@ module Fees
       @adjusted_fee[key] = scope.first
     end
 
-    def init_true_up_fee(fee:, amount_cents:, precise_amount_cents:)
-      true_up_fee = Fees::CreateTrueUpService.call(fee:, amount_cents:, precise_amount_cents:).true_up_fee
+    def init_true_up_fee
+      fee = result.fees.find { |f| f.charge_filter_id.nil? }
+
+      if charge.applied_pricing_unit
+        used_amount_cents = result.fees.map(&:pricing_unit_usage).sum(&:amount_cents)
+        used_precise_amount_cents = result.fees.map(&:pricing_unit_usage).sum(&:precise_amount_cents)
+      else
+        used_amount_cents = result.fees.sum(&:amount_cents)
+        used_precise_amount_cents = result.fees.sum(&:precise_amount_cents)
+      end
+
+      true_up_fee = Fees::CreateTrueUpService.call(fee:, used_amount_cents:, used_precise_amount_cents:).true_up_fee
       result.fees << true_up_fee if true_up_fee
     end
 
@@ -304,8 +324,8 @@ module Fees
     def aggregation_filters(charge_filter: nil)
       filters = {}
 
-      properties = charge_filter&.properties || charge.properties
-      filters[:grouped_by] = properties["grouped_by"] if charge.supports_grouped_by? && properties["grouped_by"].present?
+      model = charge_filter.presence || charge
+      filters[:grouped_by] = model.pricing_group_keys if model.pricing_group_keys.present?
 
       if charge_filter.present?
         result = ChargeFilters::MatchingAndIgnoredService.call(charge:, filter: charge_filter)

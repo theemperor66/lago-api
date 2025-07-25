@@ -20,6 +20,11 @@ RSpec.describe GraphqlController, type: :request do
       GQL
     end
 
+    before do
+      allow(CurrentContext).to receive(:source=)
+      allow(CurrentContext).to receive(:api_key_id=)
+    end
+
     it "returns GraphQL response" do
       post "/graphql",
         params: {
@@ -33,8 +38,9 @@ RSpec.describe GraphqlController, type: :request do
         }
 
       expect(response.status).to be(200)
-      expect(CurrentContext.source).to eq "graphql"
-      expect(CurrentContext.api_key_id).to be_nil
+      expect(CurrentContext).to have_received(:source=).with("graphql")
+      expect(CurrentContext).to have_received(:api_key_id=).with(nil)
+
       json = JSON.parse(response.body)
       expect(json["data"]["loginUser"]["token"]).to be_present
       expect(json["data"]["loginUser"]["user"]["id"]).to eq(user.id)
@@ -43,20 +49,20 @@ RSpec.describe GraphqlController, type: :request do
 
     context "with JWT token" do
       let(:token) do
-        UsersService.new.new_token(user).token
+        Auth::TokenService.encode(user:)
       end
-      let(:expired_token) do
+      let(:near_expiration_token) do
         JWT.encode(
           {
             sub: user.id,
-            exp: Time.now.to_i
+            exp: 30.minutes.from_now.to_i
           },
           ENV["SECRET_KEY_BASE"],
           "HS256"
         )
       end
 
-      it "retrieves the current user and refreshes the token" do
+      it "retrieves the current user" do
         post "/graphql",
           headers: {
             "Authorization" => "Bearer #{token}"
@@ -72,7 +78,6 @@ RSpec.describe GraphqlController, type: :request do
           }
 
         expect(response.status).to be(200)
-        expect(response.headers["x-lago-token"]).to be_present
       end
 
       it "retrieves the current organization" do
@@ -92,17 +97,13 @@ RSpec.describe GraphqlController, type: :request do
           }
 
         expect(response.status).to be(200)
-        expect(response.headers["x-lago-token"]).to be_present
       end
 
-      it "handles the token expiration" do
-        expired_token
-        sleep 1 # Ensure token is expired
-
+      it "renews the token" do
         post(
           "/graphql",
           headers: {
-            "Authorization" => "Bearer #{expired_token}"
+            "Authorization" => "Bearer #{near_expiration_token}"
           },
           params: {
             query: mutation,
@@ -116,12 +117,7 @@ RSpec.describe GraphqlController, type: :request do
         )
 
         expect(response.status).to be(200)
-
-        json = JSON.parse(response.body)
-        expect(json["errors"]).to be_present
-        expect(json["errors"].first["message"]).to eq("expired_jwt_token")
-        expect(json["errors"].first["extensions"]["code"]).to eq("expired_jwt_token")
-        expect(json["errors"].first["extensions"]["status"]).to eq(401)
+        expect(response.headers["x-lago-token"]).to be_present
       end
     end
 
@@ -153,6 +149,54 @@ RSpec.describe GraphqlController, type: :request do
         )
 
         expect(response.status).to be(200)
+      end
+    end
+
+    context "with query length validation" do
+      let(:token) do
+        Auth::TokenService.encode(user:)
+      end
+
+      it "rejects queries that exceed maximum length" do
+        long_query = "query { " + "a" * (GraphqlController::MAX_QUERY_LENGTH + 1) + " }"
+
+        post "/graphql",
+          headers: {
+            "Authorization" => "Bearer #{token}"
+          },
+          params: {
+            query: long_query
+          }
+
+        expect(response.status).to be(200)
+
+        json = JSON.parse(response.body)
+        expect(json["errors"]).to be_present
+        expect(json["errors"].first["message"]).to include("Max query length is 15000")
+        expect(json["errors"].first["extensions"]["code"]).to eq("query_is_too_large")
+        expect(json["errors"].first["extensions"]["status"]).to eq(413)
+      end
+
+      it "accepts queries within maximum length" do
+        normal_query = mutation
+
+        post "/graphql",
+          headers: {
+            "Authorization" => "Bearer #{token}"
+          },
+          params: {
+            query: normal_query,
+            variables: {
+              input: {
+                email: user.email,
+                password: "ILoveLago"
+              }
+            }
+          }
+
+        expect(response.status).to be(200)
+
+        expect(json["errors"]).not_to be_present
       end
     end
   end

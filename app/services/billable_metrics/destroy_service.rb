@@ -2,10 +2,17 @@
 
 module BillableMetrics
   class DestroyService < BaseService
+    Result = BaseResult[:billable_metric]
+
     def initialize(metric:)
       @metric = metric
       super
     end
+
+    activity_loggable(
+      action: "billable_metric.deleted",
+      record: -> { metric }
+    )
 
     def call
       return result.not_found_failure!(resource: "billable_metric") unless metric
@@ -17,15 +24,16 @@ module BillableMetrics
 
       ActiveRecord::Base.transaction do
         metric.discard!
-        metric.charges.discard_all
 
-        discard_filters
-
-        Invoice.where(id: draft_invoice_ids).update_all(ready_to_be_refreshed: true) # rubocop:disable Rails/SkipsModelValidations
+        # rubocop:disable Rails/SkipsModelValidations
+        metric.charges.update_all(deleted_at: Time.current)
+        Invoice.where(id: draft_invoice_ids).update_all(ready_to_be_refreshed: true)
+        # rubocop:enable Rails/SkipsModelValidations
       end
 
       # NOTE: Discard all related events asynchronously.
       BillableMetrics::DeleteEventsJob.perform_later(metric)
+      BillableMetricFilters::DestroyAllJob.perform_later(metric.id)
 
       result.billable_metric = metric
       result
@@ -34,13 +42,5 @@ module BillableMetrics
     private
 
     attr_reader :metric
-
-    def discard_filters
-      metric.filters.each do |filter|
-        filter.filter_values.discard_all
-        filter.charge_filters.discard_all
-        filter.discard!
-      end
-    end
   end
 end

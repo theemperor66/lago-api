@@ -3,7 +3,7 @@
 source "https://rubygems.org"
 git_source(:github) { |repo| "https://github.com/#{repo}.git" }
 
-ruby "3.4.3"
+ruby "3.4.4"
 
 # Core
 gem "aasm"
@@ -56,7 +56,6 @@ gem "gocardless_pro", "~> 2.34"
 gem "stripe"
 
 # Analytics
-gem "activejob-traceable"
 gem "analytics-ruby", "~> 2.4.0", require: "segment/analytics"
 
 # Logging
@@ -73,7 +72,7 @@ gem "opentelemetry-exporter-otlp"
 gem "opentelemetry-instrumentation-all"
 gem "opentelemetry-sdk"
 
-gem "stackprof", require: false
+gem "stackprof", require: false, platforms: [:ruby, :mri]
 gem "sentry-rails"
 gem "sentry-ruby"
 gem "sentry-sidekiq"
@@ -105,7 +104,7 @@ group :development, :test, :staging do
 end
 
 group :development, :test do
-  gem "byebug"
+  gem "bullet"
   gem "clockwork-test"
   gem "debug", platforms: %i[mri mingw x64_mingw], require: false
   gem "dotenv"
@@ -114,8 +113,13 @@ group :development, :test do
   gem "simplecov", require: false
   gem "webmock"
   gem "awesome_print"
-  gem "pry"
+  gem "pry-byebug"
   gem "knapsack_pro", "~> 8.1"
+  gem "parallel_tests", "~> 5.3"
+
+  gem "database_cleaner-active_record"
+  gem "rspec-graphql_matchers"
+  gem "shoulda-matchers"
 
   gem "i18n-tasks", git: "https://github.com/glebm/i18n-tasks.git", require: false
   gem "rubocop-rails", require: false
@@ -126,15 +130,11 @@ group :development, :test do
 end
 
 group :test do
-  gem "database_cleaner-active_record"
   gem "guard-rspec", require: false
-  gem "rspec-graphql_matchers"
-  gem "shoulda-matchers"
   gem "karafka-testing"
 end
 
 group :development do
-  gem "bullet"
   gem "coffee-rails"
   gem "graphiql-rails", git: "https://github.com/rmosolgo/graphiql-rails.git"
 

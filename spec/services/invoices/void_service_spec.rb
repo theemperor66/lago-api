@@ -3,7 +3,9 @@
 require "rails_helper"
 
 RSpec.describe Invoices::VoidService, type: :service do
-  subject(:void_service) { described_class.new(invoice:) }
+  subject(:void_service) { described_class.new(invoice:, params:) }
+
+  let(:params) { {} }
 
   describe "#call" do
     context "when invoice is nil" do
@@ -56,13 +58,13 @@ RSpec.describe Invoices::VoidService, type: :service do
       context "when the payment status is succeeded" do
         let(:payment_status) { :succeeded }
 
-        it "returns a failure" do
+        it "voids the invoice" do
           result = void_service.call
 
           aggregate_failures do
-            expect(result).not_to be_success
-            expect(result.error).to be_a(BaseService::MethodNotAllowedFailure)
-            expect(result.error.code).to eq("not_voidable")
+            expect(result).to be_success
+            expect(result.invoice).to be_voided
+            expect(result.invoice.voided_at).to be_present
           end
         end
       end
@@ -97,6 +99,115 @@ RSpec.describe Invoices::VoidService, type: :service do
           void_service.call
 
           expect(invoice.subscriptions.first.lifetime_usage.recalculate_invoiced_usage).to be(true)
+        end
+
+        it "produces an activity log" do
+          invoice = described_class.call(invoice:).invoice
+
+          expect(Utils::ActivityLog).to have_produced("invoice.voided").after_commit.with(invoice)
+        end
+
+        context "when the invoice has applied credits from the wallet" do
+          let(:wallet) { create(:wallet, credits_balance: 100, balance_cents: 100) }
+          let(:wallet_transaction) { create(:wallet_transaction, wallet:, invoice:, transaction_type: "outbound", amount: 100, credit_amount: 100) }
+
+          before do
+            wallet_transaction
+            allow(WalletTransactions::RecreditService).to receive(:call).and_call_original
+          end
+
+          it "recredits the wallet transaction" do
+            void_service.call
+            expect(WalletTransactions::RecreditService).to have_received(:call).with(wallet_transaction: wallet_transaction)
+            expect(wallet.wallet_transactions.count).to eq(2)
+            expect(wallet.reload.credits_balance).to eq(200)
+          end
+        end
+
+        context "when the invoice has credits from applied coupons" do
+          let(:coupon) { create(:coupon) }
+          let(:applied_coupon) { create(:applied_coupon, coupon: coupon) }
+          let!(:credit) { create(:credit, invoice: invoice, applied_coupon: applied_coupon) }
+
+          before do
+            allow(AppliedCoupons::RecreditService).to receive(:call!).and_call_original
+          end
+
+          it "calls the recredit service for applied coupons" do
+            void_service.call
+            expect(AppliedCoupons::RecreditService).to have_received(:call!).with(credit: credit)
+          end
+        end
+
+        context "when the invoice has credits from credit notes" do
+          let(:credit_note) { create(:credit_note) }
+          let!(:credit) { create(:credit, invoice: invoice, credit_note: credit_note) }
+
+          before do
+            allow(CreditNotes::RecreditService).to receive(:call!).and_call_original
+          end
+
+          it "calls the recredit service for credit notes" do
+            void_service.call
+            expect(CreditNotes::RecreditService).to have_received(:call!).with(credit: credit)
+          end
+        end
+
+        context "when invoice is a purchase credits invoice" do
+          let(:invoice) { create(:invoice, :credit, status: :finalized, payment_status:, payment_overdue: true) }
+          let(:payment_status) { [:pending, :failed].sample }
+          let(:wallet) { create(:wallet, credits_balance: 100, balance_cents: 100) }
+          let(:wallet_transaction) { create(:wallet_transaction, wallet:, invoice:, transaction_type: "inbound", amount: 100, credit_amount: 100) }
+
+          before do
+            wallet_transaction
+            allow(WalletTransactions::RecreditService).to receive(:call).and_call_original
+          end
+
+          it "voids the invoice" do
+            result = void_service.call
+
+            expect(result).to be_success
+            expect(result.invoice).to be_voided
+            expect(result.invoice.voided_at).to be_present
+          end
+
+          it "does not recredit the wallet transaction" do
+            void_service.call
+
+            expect(wallet.wallet_transactions.count).to eq(1)
+            expect(wallet.reload.credits_balance).to eq(100)
+            expect(WalletTransactions::RecreditService).not_to have_received(:call)
+          end
+        end
+      end
+    end
+
+    describe "when generate credit note is true" do
+      let(:params) { {generate_credit_note: true} }
+
+      context "when invoice is nil" do
+        let(:invoice) { nil }
+
+        it "returns a failure" do
+          result = void_service.call
+
+          expect(result).not_to be_success
+          expect(result.error).to be_a(BaseService::NotFoundFailure)
+          expect(result.error.resource).to eq("invoice")
+        end
+      end
+
+      context "when the invoice is voided" do
+        around { |test| lago_premium!(&test) }
+
+        let(:invoice) { create(:invoice, status: :voided) }
+
+        it "returns a failure" do
+          result = void_service.call
+          expect(result).not_to be_success
+          expect(result.error).to be_a(BaseService::MethodNotAllowedFailure)
+          expect(result.error.code).to eq("not_voidable")
         end
       end
     end

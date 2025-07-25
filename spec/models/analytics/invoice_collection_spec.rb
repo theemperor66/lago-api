@@ -84,12 +84,15 @@ RSpec.describe Analytics::InvoiceCollection, type: :model do
     let(:billing_entity2) { create(:billing_entity, organization: organization) }
     let(:invoices) {
       [
-        create(:invoice, organization:, billing_entity: billing_entity1, issuing_date: 2.months.ago, total_amount_cents: 100, status: :pending),
-        create(:invoice, organization:, billing_entity: billing_entity1, issuing_date: 2.months.ago, total_amount_cents: 200, status: :finalized),
-        create(:invoice, organization:, billing_entity: billing_entity2, issuing_date: 1.month.ago, total_amount_cents: 300, status: :pending),
-        create(:invoice, organization:, billing_entity: billing_entity2, issuing_date: 1.month.ago, total_amount_cents: 400, status: :finalized)
+        create(:invoice, organization:, customer: customer1, billing_entity: billing_entity1, issuing_date: 2.months.ago, total_amount_cents: 100, status: :pending),
+        create(:invoice, organization:, customer: customer1, billing_entity: billing_entity1, issuing_date: 2.months.ago, total_amount_cents: 200, status: :finalized),
+        create(:invoice, organization:, customer: customer2, billing_entity: billing_entity2, issuing_date: 1.month.ago, total_amount_cents: 300, status: :pending),
+        create(:invoice, organization:, customer: customer2, billing_entity: billing_entity2, issuing_date: 1.month.ago, total_amount_cents: 400, status: :finalized)
       ]
     }
+
+    let(:customer1) { create(:customer, organization:, tax_identification_number: nil) }
+    let(:customer2) { create(:customer, organization:, tax_identification_number: "123456789") }
 
     before { invoices }
 
@@ -123,6 +126,57 @@ RSpec.describe Analytics::InvoiceCollection, type: :model do
                          "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
           hash_including({"month" => Time.current.beginning_of_month,
                          "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0})
+        ])
+      end
+    end
+
+    context "when billing entity code is provided" do
+      let(:args) { {billing_entity_code: billing_entity2.code} }
+
+      it "returns the finalized invoices collections filtered by billing_entity_code" do
+        expect(invoice_collections).to match_array([
+          hash_including({"month" => Time.current.beginning_of_month - 3.months,
+                         "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 2.months,
+                         "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 1.month,
+                         "payment_status" => "pending", "currency" => "EUR", "invoices_count" => 1, "amount_cents" => 400.0}),
+          hash_including({"month" => Time.current.beginning_of_month,
+                         "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0})
+        ])
+      end
+    end
+
+    context "when is_customer_tin_empty is true" do
+      let(:args) { {is_customer_tin_empty: true} }
+
+      it "invoices collections for customer with no tax_identification_number" do
+        expect(invoice_collections).to match_array([
+          hash_including({"month" => Time.current.beginning_of_month - 3.months,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 2.months,
+            "payment_status" => "pending", "currency" => "EUR", "invoices_count" => 1, "amount_cents" => 200.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 1.month,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0})
+        ])
+      end
+    end
+
+    context "when is_customer_tin_empty is false" do
+      let(:args) { {is_customer_tin_empty: false} }
+
+      it "invoices collections for customer with tax_identification_number" do
+        expect(invoice_collections).to match_array([
+          hash_including({"month" => Time.current.beginning_of_month - 3.months,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 2.months,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0}),
+          hash_including({"month" => Time.current.beginning_of_month - 1.month,
+            "payment_status" => "pending", "currency" => "EUR", "invoices_count" => 1, "amount_cents" => 400.0}),
+          hash_including({"month" => Time.current.beginning_of_month,
+            "payment_status" => nil, "currency" => nil, "invoices_count" => 0, "amount_cents" => 0.0})
         ])
       end
     end

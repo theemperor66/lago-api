@@ -7,7 +7,7 @@ class Credit < ApplicationRecord
   belongs_to :applied_coupon, optional: true
   belongs_to :credit_note, optional: true
   belongs_to :progressive_billing_invoice, class_name: "Invoice", optional: true
-  belongs_to :organization, optional: true
+  belongs_to :organization
 
   has_one :coupon, -> { with_discarded }, through: :applied_coupon
 
@@ -18,6 +18,8 @@ class Credit < ApplicationRecord
   scope :coupon_kind, -> { where.not(applied_coupon_id: nil) }
   scope :credit_note_kind, -> { where.not(credit_note_id: nil) }
   scope :progressive_billing_invoice_kind, -> { where.not(progressive_billing_invoice_id: nil) }
+  scope :active, -> { joins(:invoice).where.not(invoices: {status: :voided}) }
+  scope :voided, -> { joins(:invoice).where(invoices: {status: :voided}) }
 
   def item_id
     return coupon&.id if applied_coupon_id
@@ -85,7 +87,7 @@ end
 #  applied_coupon_id              :uuid
 #  credit_note_id                 :uuid
 #  invoice_id                     :uuid
-#  organization_id                :uuid
+#  organization_id                :uuid             not null
 #  progressive_billing_invoice_id :uuid
 #
 # Indexes

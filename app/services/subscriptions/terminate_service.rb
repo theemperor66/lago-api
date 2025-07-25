@@ -2,10 +2,14 @@
 
 module Subscriptions
   class TerminateService < BaseService
-    def initialize(subscription:, async: true, upgrade: false)
+    Result = BaseResult[:subscription]
+
+    def initialize(subscription:, async: true, upgrade: false, on_termination_credit_note: subscription&.on_termination_credit_note, on_termination_invoice: subscription&.on_termination_invoice)
       @subscription = subscription
       @async = async
       @upgrade = upgrade
+      @on_termination_credit_note = on_termination_credit_note.blank? ? :credit : on_termination_credit_note.to_sym
+      @on_termination_invoice = on_termination_invoice.blank? ? :generate : on_termination_invoice.to_sym
 
       super
     end
@@ -13,46 +17,43 @@ module Subscriptions
     def call
       return result.not_found_failure!(resource: "subscription") if subscription.blank?
 
-      if subscription.pending?
-        subscription.mark_as_canceled!
-      elsif !subscription.terminated?
-        subscription.mark_as_terminated!
+      ActiveRecord::Base.transaction do
+        if subscription.pending?
+          subscription.mark_as_canceled!
+        elsif !subscription.terminated?
+          subscription.mark_as_terminated!
+          update_on_termination_actions!
 
-        if subscription.should_sync_hubspot_subscription?
-          Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_later(subscription:)
+          if subscription.should_sync_hubspot_subscription?
+            Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_after_commit(subscription:)
+          end
+
+          if generate_credit_note_for_unconsumed_subscription?
+            # NOTE: As subscription was payed in advance and terminated before the end of the period,
+            #       we have to create a credit note for the days that were not consumed
+            CreditNotes::CreateFromTermination.call!(
+              subscription:,
+              reason: "order_cancellation",
+              upgrade:
+            )
+          end
+
+          # NOTE: We should bill subscription and generate invoice for all cases except for the upgrade
+          #       For upgrade we will create only one invoice for termination charges and for in advance charges
+          #       It is handled in subscriptions/create_service.rb
+          bill_subscription unless upgrade
         end
 
-        if subscription.plan.pay_in_advance? && pay_in_advance_invoice_issued?
-          # NOTE: As subscription was payed in advance and terminated before the end of the period,
-          #       we have to create a credit note for the days that were not consumed
-          credit_note_result = CreditNotes::CreateFromTermination.new(
-            subscription:,
-            reason: "order_cancellation",
-            upgrade:
-          ).call
-          credit_note_result.raise_if_error!
-        end
-
-        # NOTE: We should bill subscription and generate invoice for all cases except for the upgrade
-        #       For upgrade we will create only one invoice for termination charges and for in advance charges
-        #       It is handled in subscriptions/create_service.rb
-        bill_subscription unless upgrade
+        cancel_next_subscription
       end
 
-      # NOTE: Pending next subscription should be canceled as well
-      next_subscription = subscription.next_subscription
-      next_subscription&.mark_as_canceled!
-
-      if next_subscription&.should_sync_hubspot_subscription?
-        Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_later(subscription: next_subscription)
-      end
-
-      # NOTE: Wait to ensure job is performed at the end of the database transaction.
-      # See https://github.com/getlago/lago-api/blob/main/app/services/subscriptions/create_service.rb#L46.
-      SendWebhookJob.set(wait: 2.seconds).perform_later("subscription.terminated", subscription)
+      SendWebhookJob.perform_after_commit("subscription.terminated", subscription)
+      Utils::ActivityLog.produce_after_commit(subscription, "subscription.terminated")
 
       result.subscription = subscription
       result
+    rescue BaseService::FailedResult => e
+      e.result
     end
 
     # NOTE: Called to terminate a downgraded subscription
@@ -89,7 +90,9 @@ module Subscriptions
       BillNonInvoiceableFeesJob.perform_later([subscription], rotation_date) # Ignore next subscription since there can't be events
 
       SendWebhookJob.perform_later("subscription.terminated", subscription)
+      Utils::ActivityLog.produce(subscription, "subscription.terminated")
       SendWebhookJob.perform_later("subscription.started", next_subscription)
+      Utils::ActivityLog.produce(next_subscription, "subscription.started")
 
       result.subscription = next_subscription
 
@@ -100,28 +103,41 @@ module Subscriptions
 
     private
 
-    attr_reader :subscription, :async, :upgrade
+    attr_reader :subscription, :async, :upgrade, :on_termination_credit_note, :on_termination_invoice
+
+    def cancel_next_subscription
+      next_subscription = subscription.next_subscription
+      return if next_subscription.nil?
+
+      next_subscription.mark_as_canceled!
+
+      if next_subscription.should_sync_hubspot_subscription?
+        Integrations::Aggregator::Subscriptions::Hubspot::UpdateJob.perform_after_commit(subscription: next_subscription)
+      end
+    end
 
     def bill_subscription
+      if bill_in_arrears_fees?
+        if async
+          BillSubscriptionJob.perform_after_commit(
+            [subscription],
+            subscription.terminated_at,
+            invoicing_reason: :subscription_terminating
+          )
+        else
+          BillSubscriptionJob.perform_now(
+            [subscription],
+            subscription.terminated_at,
+            invoicing_reason: :subscription_terminating
+          )
+        end
+      end
+
+      # We always bill pay-in-advance non-invoiceable charges unless it's an upgrade.
       if async
-        # NOTE: Wait to ensure job is performed at the end of the database transaction.
-        # See https://github.com/getlago/lago-api/blob/main/app/services/subscriptions/create_service.rb#L46.
-        BillSubscriptionJob.set(wait: 2.seconds).perform_later(
-          [subscription],
-          subscription.terminated_at,
-          invoicing_reason: :subscription_terminating
-        )
-        BillNonInvoiceableFeesJob.set(wait: 2.seconds).perform_later([subscription], subscription.terminated_at)
+        BillNonInvoiceableFeesJob.perform_after_commit([subscription], subscription.terminated_at)
       else
-        BillSubscriptionJob.perform_now(
-          [subscription],
-          subscription.terminated_at,
-          invoicing_reason: :subscription_terminating
-        )
-        BillNonInvoiceableFeesJob.perform_now(
-          [subscription],
-          subscription.terminated_at
-        )
+        BillNonInvoiceableFeesJob.perform_now([subscription], subscription.terminated_at)
       end
     end
 
@@ -162,6 +178,31 @@ module Subscriptions
       )
 
       dates_service.previous_beginning_of_period(current_period: true).to_datetime
+    end
+
+    def generate_credit_note_for_unconsumed_subscription?
+      pay_in_advance? && pay_in_advance_invoice_issued? && on_termination_credit_note == :credit
+    end
+
+    def pay_in_advance?
+      subscription.plan.pay_in_advance?
+    end
+
+    def pay_in_arrears?
+      !pay_in_advance?
+    end
+
+    def bill_in_arrears_fees?
+      on_termination_invoice == :generate
+    end
+
+    def update_on_termination_actions!
+      params = {}
+      params[:on_termination_credit_note] = on_termination_credit_note if pay_in_advance? && subscription.on_termination_credit_note != on_termination_credit_note
+      params[:on_termination_invoice] = on_termination_invoice if subscription.on_termination_invoice != on_termination_invoice
+      return if params.empty?
+
+      Subscriptions::UpdateService.call!(subscription:, params:)
     end
   end
 end

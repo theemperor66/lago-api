@@ -18,7 +18,7 @@ module Charges
           billable_metric_id: params[:billable_metric_id],
           invoice_display_name: params[:invoice_display_name],
           amount_currency: params[:amount_currency],
-          charge_model: charge_model(params),
+          charge_model: params[:charge_model],
           parent_id: params[:parent_id],
           pay_in_advance: params[:pay_in_advance] || false,
           prorated: params[:prorated] || false
@@ -46,6 +46,8 @@ module Charges
 
         charge.save!
 
+        AppliedPricingUnits::CreateService.call!(charge:, params: params[:applied_pricing_unit])
+
         if params[:tax_codes]
           taxes_result = Charges::ApplyTaxesService.call(charge:, tax_codes: params[:tax_codes])
           taxes_result.raise_if_error!
@@ -64,12 +66,5 @@ module Charges
     private
 
     attr_reader :plan, :params
-
-    def charge_model(params)
-      model = params[:charge_model]&.to_sym
-      return if model == :graduated_percentage && !License.premium?
-
-      model
-    end
   end
 end

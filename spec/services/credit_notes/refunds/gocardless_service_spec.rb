@@ -109,6 +109,13 @@ RSpec.describe CreditNotes::Refunds::GocardlessService, type: :service do
             }
           )
       end
+
+      it "produces an activity log" do
+        expect { gocardless_service.create }
+          .to raise_error(GoCardlessPro::Error)
+
+        expect(Utils::ActivityLog).to have_produced("credit_note.refund_failure").with(credit_note)
+      end
     end
 
     context "with a validation error on gocardless" do
@@ -187,6 +194,31 @@ RSpec.describe CreditNotes::Refunds::GocardlessService, type: :service do
           expect(result.refund).to be_nil
 
           expect(gocardless_refunds_service).not_to have_received(:create)
+        end
+      end
+    end
+
+    context "when payment provider customer was discarded" do
+      before { gocardless_customer.discard }
+
+      it "creates a gocardless refund" do
+        result = gocardless_service.create
+
+        aggregate_failures do
+          expect(result).to be_success
+
+          expect(result.refund.id).to be_present
+
+          expect(result.refund.credit_note).to eq(credit_note)
+          expect(result.refund.payment).to eq(payment)
+          expect(result.refund.payment_provider).to eq(gocardless_payment_provider)
+          expect(result.refund.payment_provider_customer).to eq(gocardless_customer)
+          expect(result.refund.amount_cents).to eq(134)
+          expect(result.refund.amount_currency).to eq("CHF")
+          expect(result.refund.status).to eq("paid")
+          expect(result.refund.provider_refund_id).to eq("re_123456")
+
+          expect(result.credit_note).to be_succeeded
         end
       end
     end
@@ -269,7 +301,9 @@ RSpec.describe CreditNotes::Refunds::GocardlessService, type: :service do
     end
 
     context "when status is failed" do
-      before { gocardless_service }
+      before do
+        gocardless_service
+      end
 
       it "delivers an error webhook" do
         result = gocardless_service.update_status(
@@ -295,6 +329,15 @@ RSpec.describe CreditNotes::Refunds::GocardlessService, type: :service do
               }
             )
         end
+      end
+
+      it "produces an activity log" do
+        gocardless_service.update_status(
+          provider_refund_id: refund.provider_refund_id,
+          status: "failed"
+        )
+
+        expect(Utils::ActivityLog).to have_produced("credit_note.refund_failure").with(credit_note)
       end
     end
   end

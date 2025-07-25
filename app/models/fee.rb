@@ -19,8 +19,9 @@ class Fee < ApplicationRecord
   belongs_to :billing_entity
 
   has_one :adjusted_fee, dependent: :nullify
-  has_one :customer, through: :subscription
   has_one :billable_metric, -> { with_discarded }, through: :charge
+  has_one :customer, through: :subscription
+  has_one :pricing_unit_usage, dependent: :destroy
   has_one :true_up_fee, class_name: "Fee", foreign_key: :true_up_parent_fee_id, dependent: :destroy
 
   has_many :credit_note_items, dependent: :destroy
@@ -136,7 +137,6 @@ class Fee < ApplicationRecord
     base_clause = "#{invoice_name} #{filter_display_name}".downcase
 
     return base_clause unless charge?
-    return base_clause unless charge.supports_grouped_by?
     return base_clause if grouped_by.blank?
 
     "#{invoice_name} #{grouped_by.values.join} #{filter_display_name}".downcase
@@ -224,6 +224,7 @@ end
 #  payment_status                      :integer          default("pending"), not null
 #  precise_amount_cents                :decimal(40, 15)  default(0.0), not null
 #  precise_coupons_amount_cents        :decimal(30, 5)   default(0.0), not null
+#  precise_credit_notes_amount_cents   :decimal(30, 5)   default(0.0), not null
 #  precise_unit_amount                 :decimal(30, 15)  default(0.0), not null
 #  properties                          :jsonb            not null
 #  refunded_at                         :datetime

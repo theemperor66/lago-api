@@ -11,6 +11,7 @@ RSpec.describe Invoices::PaidCreditService, type: :service do
 
   describe "call" do
     let(:organization) { create(:organization) }
+    let(:billing_entity) { customer.billing_entity }
     let(:customer) { create(:customer, organization:, payment_provider: :stripe) }
     let(:subscription) { create(:subscription, plan:, customer:) }
     let(:plan) { create(:plan, organization:) }
@@ -61,6 +62,12 @@ RSpec.describe Invoices::PaidCreditService, type: :service do
       expect do
         invoice_service.call
       end.to have_enqueued_job(SendWebhookJob)
+    end
+
+    it "produces an activity log" do
+      invoice = invoice_service.call.invoice
+
+      expect(Utils::ActivityLog).to have_produced("invoice.paid_credit_added").with(invoice)
     end
 
     it_behaves_like "syncs invoice" do

@@ -9,7 +9,7 @@ RSpec.describe UsageMonitoring::ProcessSubscriptionActivityService, type: :servi
   let(:mocked_current_usage) { double("current_usage") } # rubocop:disable RSpec/VerifiedDoubles
   let(:customer) { create(:customer, organization:) }
   let(:subscription) { create(:subscription, customer:) }
-  let!(:subscription_activity) { create(:subscription_activity, subscription:) }
+  let!(:subscription_activity) { create(:subscription_activity, subscription:, organization:) }
 
   before do
     allow(::Invoices::CustomerUsageService).to receive(:call)
@@ -100,6 +100,52 @@ RSpec.describe UsageMonitoring::ProcessSubscriptionActivityService, type: :servi
     it "does not create a new lifetime usage" do
       create(:lifetime_usage, subscription: subscription, organization: organization)
       expect { service.call }.not_to change(LifetimeUsage, :count)
+    end
+  end
+
+  context "when subscription has alerts" do
+    let(:premium_integrations) { [] }
+    let(:billable_metric) { create(:billable_metric, organization:) }
+    let(:alert) { create(:usage_current_amount_alert, organization:, subscription_external_id: subscription.external_id) }
+    let(:alert_2) { create(:billable_metric_current_usage_amount_alert, billable_metric:, organization:, subscription_external_id: subscription.external_id) }
+    let(:alert_3) { create(:billable_metric_current_usage_units_alert, billable_metric:, organization:, subscription_external_id: subscription.external_id) }
+    let(:alert_4) { create(:lifetime_usage_amount_alert, organization:, subscription_external_id: subscription.external_id) }
+
+    before do
+      alert
+      alert_2
+      alert_3
+      alert_4
+      allow(::UsageMonitoring::ProcessAlertService).to receive(:call)
+    end
+
+    it "processes the alerts" do
+      service.call
+      expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).exactly(4).times
+      expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).with(alert: alert, subscription:, current_metrics: mocked_current_usage)
+      expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).with(alert: alert_2, subscription:, current_metrics: mocked_current_usage)
+      expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).with(alert: alert_3, subscription:, current_metrics: mocked_current_usage)
+      expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).with(alert: alert_4, subscription:, current_metrics: subscription.lifetime_usage)
+      expect { subscription_activity.reload }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+
+    context "when alerting fail" do
+      it "deletes subscription_activity before raising" do
+        allow(::UsageMonitoring::ProcessAlertService).to receive(:call).and_raise(StandardError, "boom")
+        expect { service.call }.to raise_error(StandardError, "boom")
+        expect { subscription_activity.reload }.to raise_error(ActiveRecord::RecordNotFound)
+      end
+    end
+
+    context "when progressive_billing fail" do
+      let(:premium_integrations) { %w[lifetime_usage progressive_billing] }
+
+      it "processes alert and then raise" do
+        allow(LifetimeUsages::CheckThresholdsService).to receive(:call).and_raise(StandardError, "boom")
+        expect { service.call }.to raise_error(StandardError, "boom")
+        expect(::UsageMonitoring::ProcessAlertService).to have_received(:call).with(alert:, subscription:, current_metrics: mocked_current_usage)
+        expect { subscription_activity.reload }.to raise_error(ActiveRecord::RecordNotFound)
+      end
     end
   end
 end

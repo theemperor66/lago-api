@@ -3,15 +3,17 @@
 require "rails_helper"
 
 RSpec.describe IntegrationCustomers::BaseCustomer, type: :model do
-  subject(:integration_customer) { described_class.new(integration:, customer:, type:, external_customer_id:) }
+  subject(:integration_customer) { described_class.new(integration:, customer:, type:, external_customer_id:, organization:) }
 
   let(:integration) { create(:netsuite_integration) }
   let(:type) { "IntegrationCustomers::NetsuiteCustomer" }
   let(:customer) { create(:customer) }
+  let(:organization) { customer.organization }
   let(:external_customer_id) { "123" }
 
   it { is_expected.to belong_to(:integration) }
   it { is_expected.to belong_to(:customer) }
+  it { is_expected.to belong_to(:organization) }
 
   describe ".accounting_kind" do
     let(:netsuite_customer) { create(:netsuite_customer) }
@@ -28,6 +30,24 @@ RSpec.describe IntegrationCustomers::BaseCustomer, type: :model do
 
     it "returns only accounting kind customers" do
       expect(described_class.accounting_kind).to contain_exactly(netsuite_customer, xero_customer)
+    end
+  end
+
+  describe ".tax_kind" do
+    let(:netsuite_customer) { create(:netsuite_customer) }
+    let(:xero_customer) { create(:xero_customer) }
+    let(:anrok_customer) { create(:anrok_customer) }
+    let(:avalara_customer) { create(:avalara_customer) }
+
+    before do
+      netsuite_customer
+      xero_customer
+      anrok_customer
+      avalara_customer
+    end
+
+    it "returns only tax kind customers" do
+      expect(described_class.tax_kind).to contain_exactly(anrok_customer, avalara_customer)
     end
   end
 
@@ -149,6 +169,23 @@ RSpec.describe IntegrationCustomers::BaseCustomer, type: :model do
     end
   end
 
+  describe "#tax_kind?" do
+    context "with tax integration" do
+      let(:integration) { create(:anrok_integration) }
+      let(:type) { "IntegrationCustomers::AnrokCustomer" }
+
+      it "returns true" do
+        expect(integration_customer).to be_tax_kind
+      end
+    end
+
+    context "without tax integration" do
+      it "returns false" do
+        expect(integration_customer).not_to be_tax_kind
+      end
+    end
+  end
+
   describe "validations" do
     describe "of customer id uniqueness" do
       let(:errors) { another_integration_customer.errors }
@@ -167,18 +204,66 @@ RSpec.describe IntegrationCustomers::BaseCustomer, type: :model do
         end
       end
 
-      context "when it not is unique in scope of type" do
+      context "when it is not unique in scope of type" do
         subject(:another_integration_customer) do
-          described_class.new(integration:, customer:, type:, external_customer_id:)
+          described_class.new(integration:, customer:, type:, external_customer_id:, organization: organization)
         end
 
         before do
-          described_class.create(integration:, customer:, type:, external_customer_id:)
+          described_class.create(integration:, customer:, type:, external_customer_id:, organization: organization)
           another_integration_customer.valid?
         end
 
         it "adds an error" do
           expect(errors.where(:customer_id, :taken)).to be_present
+        end
+      end
+    end
+
+    describe "tax integration uniqueness validation" do
+      context "when no tax integration exists for a customer" do
+        let(:integration) { create(:anrok_integration) }
+        let(:type) { "IntegrationCustomers::AnrokCustomer" }
+
+        it "allows creating a first tax integration" do
+          expect(integration_customer).to be_valid
+        end
+      end
+
+      context "when a tax integration already exists for the customer" do
+        let(:integration) { create(:anrok_integration) }
+        let(:type) { "IntegrationCustomers::AnrokCustomer" }
+
+        context "with existing anrok integration" do
+          before do
+            create(:anrok_customer, customer:)
+          end
+
+          it "is invalid for a second AnrokCustomer" do
+            expect(integration_customer).not_to be_valid
+            expect(integration_customer.errors[:type]).to include("tax_integration_exists")
+          end
+        end
+
+        context "with existing avalara integration" do
+          before do
+            create(:avalara_customer, customer:)
+          end
+
+          it "is invalid for a different tax integration" do
+            expect(integration_customer).not_to be_valid
+            expect(integration_customer.errors[:type]).to include("tax_integration_exists")
+          end
+        end
+
+        context "when validating persisted record" do
+          before do
+            integration_customer.save!
+          end
+
+          it "does not add any errors" do
+            expect(integration_customer).to be_valid
+          end
         end
       end
     end

@@ -11,9 +11,8 @@ class CreditNote < ApplicationRecord
 
   belongs_to :customer, -> { with_discarded }
   belongs_to :invoice
-  # TODO: belongs_to :organization, optional: true
+  belongs_to :organization
 
-  has_one :organization, through: :invoice
   has_one :billing_entity, through: :invoice
 
   has_many :items, class_name: "CreditNoteItem", dependent: :destroy
@@ -25,7 +24,10 @@ class CreditNote < ApplicationRecord
   has_many :integration_resources, as: :syncable
   has_many :error_details, as: :owner, dependent: :destroy
 
-  has_many :activity_logs, class_name: "Clickhouse::ActivityLog", as: :resource
+  has_many :activity_logs,
+    -> { order(logged_at: :desc) },
+    class_name: "Clickhouse::ActivityLog",
+    as: :resource
 
   has_one_attached :file
 
@@ -196,7 +198,7 @@ end
 #  updated_at                              :datetime         not null
 #  customer_id                             :uuid             not null
 #  invoice_id                              :uuid             not null
-#  organization_id                         :uuid
+#  organization_id                         :uuid             not null
 #  sequential_id                           :integer          not null
 #
 # Indexes

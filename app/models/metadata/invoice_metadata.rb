@@ -5,7 +5,7 @@ module Metadata
     COUNT_PER_INVOICE = 5
 
     belongs_to :invoice
-    belongs_to :organization, optional: true
+    belongs_to :organization
 
     validates :key, presence: true, uniqueness: {scope: :invoice_id}, length: {maximum: 20}
     validates :value, presence: true
@@ -22,7 +22,7 @@ end
 #  created_at      :datetime         not null
 #  updated_at      :datetime         not null
 #  invoice_id      :uuid             not null
-#  organization_id :uuid
+#  organization_id :uuid             not null
 #
 # Indexes
 #

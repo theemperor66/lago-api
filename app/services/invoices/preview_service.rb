@@ -175,8 +175,7 @@ module Invoices
               cache_middleware = Subscriptions::ChargeCacheMiddleware.new(
                 subscription:,
                 charge:,
-                to_datetime: boundaries[:charges_to_datetime],
-                cache: !organization.clickhouse_events_store?
+                to_datetime: boundaries[:charges_to_datetime]
               )
 
               Fees::ChargeService
@@ -282,13 +281,13 @@ module Invoices
     end
 
     def provider_taxation?
-      customer.integration_customers.find { |ic| ic.type == "IntegrationCustomers::AnrokCustomer" }
+      customer.integration_customers.find { |ic| ic.tax_kind? }
     end
 
     def should_create_subscription_fee?(subscription)
       return true if subscription_context == :default
 
-      subscription.terminated? == subscription.plan.pay_in_arrear?
+      subscription.terminated? == subscription.plan.pay_in_arrears?
     end
 
     def should_not_create_charge_fee?(charge, subscription)

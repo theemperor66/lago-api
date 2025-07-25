@@ -336,10 +336,10 @@ RSpec.describe Api::V1::SubscriptionsController, type: :request do
           context "when customer has a default payment method on Stripe" do
             it do
               stub_request(:get, %r{/v1/customers/#{provider_customer_id}$}).and_return(
-                status: 200, body: File.read(Rails.root.join("spec/fixtures/stripe/customer_no_default_payment_method.json"))
+                status: 200, body: get_stripe_fixtures("customer_retrieve_response.json")
               )
               stub_request(:get, %r{/v1/customers/#{provider_customer_id}/payment_methods}).and_return(
-                status: 200, body: File.read(Rails.root.join("spec/fixtures/stripe/customer_list_no_payment_methods.json"))
+                status: 200, body: get_stripe_fixtures("customer_list_payment_methods_empty_response.json")
               )
 
               subject
@@ -352,7 +352,7 @@ RSpec.describe Api::V1::SubscriptionsController, type: :request do
 
         context "when the authorization failed (card declined)" do
           it do
-            stripe_card_declined = File.read(Rails.root.join("spec/fixtures/stripe/payment_intent_authorization_failed.json"))
+            stripe_card_declined = get_stripe_fixtures("payment_intent_authorization_failed_response.json")
             stub_request(:post, %r{/v1/payment_intents}).and_return(
               status: 402,
               body: stripe_card_declined,
@@ -375,21 +375,144 @@ RSpec.describe Api::V1::SubscriptionsController, type: :request do
     end
   end
 
-  describe "DELETE /api/v1subscriptions/:external_id" do
-    subject { delete_with_token(organization, "/api/v1/subscriptions/#{external_id}") }
+  describe "DELETE /api/v1/subscriptions/:external_id" do
+    subject { delete_with_token(organization, "/api/v1/subscriptions/#{external_id}", params) }
 
     let(:subscription) { create(:subscription, customer:, plan:) }
     let(:external_id) { subscription.external_id }
+    let(:params) { {} }
 
     include_examples "requires API permission", "subscription", "write"
 
-    it "terminates a subscription" do
+    def test_termination(expected_on_termination_credit_note: nil, expected_on_termination_invoice: "generate")
       subject
 
       expect(response).to have_http_status(:success)
       expect(json[:subscription][:lago_id]).to eq(subscription.id)
       expect(json[:subscription][:status]).to eq("terminated")
       expect(json[:subscription][:terminated_at]).to be_present
+      expect(json[:subscription][:on_termination_credit_note]).to eq(expected_on_termination_credit_note)
+      expect(json[:subscription][:on_termination_invoice]).to eq(expected_on_termination_invoice)
+    end
+
+    it "terminates a subscription" do
+      test_termination(expected_on_termination_credit_note: nil)
+    end
+
+    context "when plan is pay_in_arrears" do
+      let(:params) { {on_termination_credit_note: "credit"} }
+
+      it "terminates subscription but ignores on_termination_credit_note" do
+        test_termination(expected_on_termination_credit_note: nil)
+      end
+    end
+
+    context "when plan is pay_in_advance" do
+      let(:plan) { create(:plan, :pay_in_advance, organization:) }
+      let(:subscription) { create(:subscription, customer:, plan:) }
+
+      context "without on_termination_credit_note parameter" do
+        it "terminates subscription with credit note behavior" do
+          test_termination(expected_on_termination_credit_note: "credit")
+        end
+      end
+
+      context "with on_termination_credit_note parameter" do
+        [nil, "", "credit"].each do |on_termination_credit_note|
+          context "when on_termination_credit_note is #{on_termination_credit_note.inspect}" do
+            let(:params) { {on_termination_credit_note:}.compact }
+
+            it "terminates subscription with credit note behavior" do
+              test_termination(expected_on_termination_credit_note: "credit")
+            end
+          end
+        end
+
+        context "when on_termination_credit_note is skip" do
+          let(:params) { {on_termination_credit_note: "skip"} }
+
+          it "terminates subscription with skip behavior" do
+            test_termination(expected_on_termination_credit_note: "skip")
+          end
+        end
+
+        context "with invalid on_termination_credit_note value" do
+          let(:params) { {on_termination_credit_note: "invalid"} }
+
+          it "returns validation error" do
+            subject
+
+            expect(response).to have_http_status(:unprocessable_entity)
+            expect(json[:error_details]).to include(
+              on_termination_credit_note: ["invalid_value"]
+            )
+          end
+        end
+      end
+    end
+
+    context "with on_termination_invoice parameter" do
+      context "when on_termination_invoice is generate" do
+        let(:params) { {on_termination_invoice: "generate"} }
+
+        it "terminates subscription with generate invoice behavior" do
+          test_termination(expected_on_termination_invoice: "generate")
+        end
+      end
+
+      context "when on_termination_invoice is skip" do
+        let(:params) { {on_termination_invoice: "skip"} }
+
+        it "terminates subscription with skip invoice behavior" do
+          test_termination(expected_on_termination_invoice: "skip")
+        end
+      end
+
+      context "with invalid on_termination_invoice value" do
+        let(:params) { {on_termination_invoice: "invalid"} }
+
+        it "returns validation error" do
+          subject
+
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(json[:error_details]).to include(
+            on_termination_invoice: ["invalid_value"]
+          )
+        end
+      end
+
+      context "with both on_termination_credit_note and on_termination_invoice parameters" do
+        let(:plan) { create(:plan, :pay_in_advance, organization:) }
+        let(:subscription) { create(:subscription, customer:, plan:) }
+        let(:params) { {on_termination_credit_note: "skip", on_termination_invoice: "skip"} }
+
+        it "terminates subscription with both behaviors" do
+          test_termination(expected_on_termination_credit_note: "skip", expected_on_termination_invoice: "skip")
+        end
+      end
+    end
+
+    context "when subscription is pending" do
+      let(:subscription) { create(:subscription, :pending, customer:, plan:) }
+
+      it "returns a not found error" do
+        subject
+
+        expect(response).to have_http_status(:not_found)
+      end
+
+      context "when status is given" do
+        let(:params) { {status: "pending"} }
+
+        it "cancels the subscription" do
+          subject
+
+          expect(response).to have_http_status(:success)
+          expect(json[:subscription][:lago_id]).to eq(subscription.id)
+          expect(json[:subscription][:status]).to eq("canceled")
+          expect(json[:subscription][:canceled_at]).to be_present
+        end
+      end
     end
 
     context "with not existing subscription" do
@@ -568,6 +691,39 @@ RSpec.describe Api::V1::SubscriptionsController, type: :request do
       end
 
       it "returns the subscription with the given status" do
+        subject
+
+        expect(response).to have_http_status(:success)
+        expect(json[:subscription]).to include(
+          lago_id: matching_subscription.id,
+          external_id: matching_subscription.external_id
+        )
+      end
+    end
+
+    context "when there are multiple terminated subscriptions" do
+      let(:subscription) do
+        create(:subscription, customer:, plan:, status: :terminated, terminated_at: 10.days.ago)
+      end
+
+      let(:matching_subscription) do
+        create(
+          :subscription,
+          customer:,
+          plan:,
+          external_id: subscription.external_id,
+          terminated_at: 5.days.ago,
+          status: :terminated
+        )
+      end
+
+      let(:params) { {status: "terminated"} }
+
+      before do
+        matching_subscription
+      end
+
+      it "returns the latest terminated subscription" do
         subject
 
         expect(response).to have_http_status(:success)

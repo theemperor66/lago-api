@@ -3,13 +3,17 @@
 class Charge < ApplicationRecord
   include PaperTrailTraceable
   include Currencies
+  include ChargePropertiesValidation
   include Discard::Model
   self.discard_column = :deleted_at
 
-  belongs_to :organization, optional: true
+  belongs_to :organization
   belongs_to :plan, -> { with_discarded }, touch: true
   belongs_to :billable_metric, -> { with_discarded }
   belongs_to :parent, class_name: "Charge", optional: true
+
+  has_one :applied_pricing_unit, as: :pricing_unitable
+  has_one :pricing_unit, through: :applied_pricing_unit
 
   has_many :children, class_name: "Charge", foreign_key: :parent_id, dependent: :nullify
   has_many :fees
@@ -37,35 +41,34 @@ class Charge < ApplicationRecord
   attribute :regroup_paid_fees, :integer
   enum :regroup_paid_fees, REGROUPING_PAID_FEES_OPTIONS
 
-  validate :validate_amount, if: -> { standard? }
-  validate :validate_graduated, if: -> { graduated? }
-  validate :validate_package, if: -> { package? }
-  validate :validate_percentage, if: -> { percentage? }
-  validate :validate_volume, if: -> { volume? }
-  validate :validate_graduated_percentage, if: -> { graduated_percentage? }
+  validate :validate_properties
   validate :validate_dynamic, if: -> { dynamic? }
-
   validates :min_amount_cents, numericality: {greater_than_or_equal_to: 0}, allow_nil: true
   validates :charge_model, presence: true
 
+  validate :charge_model_allowance
   validate :validate_pay_in_advance
   validate :validate_regroup_paid_fees
   validate :validate_prorated
   validate :validate_min_amount_cents
   validate :validate_custom_model
 
-  monetize :min_amount_cents, with_currency: ->(charge) { charge.plan.amount_currency }
-
   default_scope -> { kept }
 
   scope :pay_in_advance, -> { where(pay_in_advance: true) }
 
-  def supports_grouped_by?
-    standard? || dynamic?
+  def pricing_group_keys
+    properties["pricing_group_keys"].presence || properties["grouped_by"]
   end
 
   def equal_properties?(charge)
     charge_model == charge.charge_model && properties == charge.properties
+  end
+
+  def equal_applied_pricing_unit_rate?(another_charge)
+    return false unless applied_pricing_unit && another_charge.applied_pricing_unit
+
+    applied_pricing_unit.conversion_rate == another_charge.applied_pricing_unit.conversion_rate
   end
 
   # NOTE: If same charge is NOT included in upgraded plan we still want to bill it. However if new plan is using
@@ -82,28 +85,8 @@ class Charge < ApplicationRecord
 
   private
 
-  def validate_amount
-    validate_charge_model(Charges::Validators::StandardService)
-  end
-
-  def validate_graduated
-    validate_charge_model(Charges::Validators::GraduatedService)
-  end
-
-  def validate_package
-    validate_charge_model(Charges::Validators::PackageService)
-  end
-
-  def validate_percentage
-    validate_charge_model(Charges::Validators::PercentageService)
-  end
-
-  def validate_volume
-    validate_charge_model(Charges::Validators::VolumeService)
-  end
-
-  def validate_graduated_percentage
-    validate_charge_model(Charges::Validators::GraduatedPercentageService)
+  def validate_properties
+    validate_charge_model_properties(charge_model)
   end
 
   def validate_dynamic
@@ -111,15 +94,6 @@ class Charge < ApplicationRecord
     return if billable_metric.sum_agg?
 
     errors.add(:charge_model, :invalid_aggregation_type_or_charge_model)
-  end
-
-  def validate_charge_model(validator)
-    instance = validator.new(charge: self)
-    return if instance.valid?
-
-    instance.result.error.messages.map { |_, codes| codes }
-      .flatten
-      .each { |code| errors.add(:properties, code) }
   end
 
   def validate_pay_in_advance
@@ -165,6 +139,12 @@ class Charge < ApplicationRecord
 
     errors.add(:charge_model, :invalid_aggregation_type_or_charge_model)
   end
+
+  def charge_model_allowance
+    if graduated_percentage? && !License.premium?
+      errors.add(:charge_model, :graduated_percentage_requires_premium_license)
+    end
+  end
 end
 
 # == Schema Information
@@ -185,18 +165,19 @@ end
 #  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #  billable_metric_id   :uuid
-#  organization_id      :uuid
+#  organization_id      :uuid             not null
 #  parent_id            :uuid
 #  plan_id              :uuid
 #
 # Indexes
 #
-#  index_charges_on_billable_metric_id  (billable_metric_id) WHERE (deleted_at IS NULL)
-#  index_charges_on_deleted_at          (deleted_at)
-#  index_charges_on_organization_id     (organization_id)
-#  index_charges_on_parent_id           (parent_id)
-#  index_charges_on_plan_id             (plan_id)
-#  index_charges_pay_in_advance         (billable_metric_id) WHERE ((deleted_at IS NULL) AND (pay_in_advance = true))
+#  idx_on_plan_id_billable_metric_id_pay_in_advance_4a205974cb  (plan_id,billable_metric_id,pay_in_advance) WHERE (deleted_at IS NULL)
+#  index_charges_on_billable_metric_id                          (billable_metric_id) WHERE (deleted_at IS NULL)
+#  index_charges_on_deleted_at                                  (deleted_at)
+#  index_charges_on_organization_id                             (organization_id)
+#  index_charges_on_parent_id                                   (parent_id)
+#  index_charges_on_plan_id                                     (plan_id)
+#  index_charges_pay_in_advance                                 (billable_metric_id) WHERE ((deleted_at IS NULL) AND (pay_in_advance = true))
 #
 # Foreign Keys
 #

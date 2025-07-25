@@ -2,7 +2,7 @@
 
 require "rails_helper"
 
-RSpec.describe Subscriptions::ActivateService, type: :service do
+RSpec.describe Subscriptions::ActivateService, type: :service, clickhouse: true do
   subject(:activate_service) { described_class.new(timestamp: timestamp.to_i) }
 
   let(:timestamp) { Time.current }
@@ -19,6 +19,8 @@ RSpec.describe Subscriptions::ActivateService, type: :service do
         .and change(Subscription.active, :count).by(3)
         .and have_enqueued_job(SendWebhookJob).exactly(3).times
         .and have_enqueued_job(BillSubscriptionJob).once
+      expect(Utils::ActivityLog).to have_received(:produce)
+        .with(an_instance_of(Subscription), "subscription.started").exactly(3).times
     end
 
     context "with customer timezone" do

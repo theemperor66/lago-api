@@ -36,6 +36,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
 
   let(:grouped_by) { nil }
   let(:grouped_by_values) { nil }
+  let(:with_grouped_by_values) { nil }
   let(:matching_filters) { {} }
   let(:ignored_filters) { [] }
 
@@ -59,8 +60,10 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
       if i.even?
         matching_filters.each { |key, values| event.properties[key] = values.first }
 
-        if grouped_by_values.present?
-          grouped_by_values.each { |grouped_by, value| event.properties[grouped_by] = value }
+        applied_grouped_by_values = grouped_by_values || with_grouped_by_values
+
+        if applied_grouped_by_values.present?
+          applied_grouped_by_values.each { |grouped_by, value| event.properties[grouped_by] = value }
         elsif grouped_by.present?
           grouped_by.each do |group|
             event.properties[group] = "#{Faker::Fantasy::Tolkien.character}_#{i}"
@@ -111,6 +114,16 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
 
       it "returns a list of events" do
         expect(event_store.events.count).to eq(2) # 1st event is ignored
+      end
+    end
+  end
+
+  describe "#with_grouped_by_values" do
+    let(:with_grouped_by_values) { {"region" => "europe"} }
+
+    it "applies the grouped_by_values in the block" do
+      event_store.with_grouped_by_values(with_grouped_by_values) do
+        expect(event_store.count).to eq(3)
       end
     end
   end
@@ -259,7 +272,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
   end
 
   describe "#unique_count" do
-    it "returns the number of unique active event properties" do
+    it "returns the number of unique active event properties", transaction: false do
       create(
         :event,
         organization_id: organization.id,
@@ -280,7 +293,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
   end
 
   describe "#prorated_unique_count" do
-    it "returns the number of unique active event properties" do
+    it "returns the number of unique active event properties", transaction: false do
       create(
         :event,
         organization_id: organization.id,
@@ -477,7 +490,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
   end
 
   describe "#prorated_unique_count_breakdown" do
-    it "returns the breakdown of add and remove of unique event properties" do
+    it "returns the breakdown of add and remove of unique event properties", transaction: false do
       Event.create!(
         transaction_id: SecureRandom.uuid,
         organization_id: organization.id,
@@ -866,7 +879,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
   end
 
   describe "#prorated_sum" do
-    it "returns the prorated sum of event properties" do
+    it "returns the prorated sum of event properties", transaction: false do
       event_store.aggregation_property = billable_metric.field_name
       event_store.numeric_property = true
 
@@ -874,7 +887,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
     end
 
     context "with persisted_duration" do
-      it "returns the prorated sum of event properties" do
+      it "returns the prorated sum of event properties", transaction: false do
         event_store.aggregation_property = billable_metric.field_name
         event_store.numeric_property = true
 
@@ -1008,7 +1021,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
       event_store.numeric_property = true
     end
 
-    it "returns the weighted sum of event properties" do
+    it "returns the weighted sum of event properties", transaction: false do
       expect(event_store.weighted_sum.round(5)).to eq(0.02218)
     end
 
@@ -1019,7 +1032,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
         ]
       end
 
-      it "returns the weighted sum of event properties" do
+      it "returns the weighted sum of event properties", transaction: false do
         expect(event_store.weighted_sum.round(5)).to eq(1000.0)
       end
     end
@@ -1040,7 +1053,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
         ]
       end
 
-      it "returns the weighted sum of event properties" do
+      it "returns the weighted sum of event properties", transaction: false do
         expect(event_store.weighted_sum.round(5)).to eq(6.0)
       end
     end
@@ -1048,7 +1061,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
     context "with initial value" do
       let(:initial_value) { 1000 }
 
-      it "uses the initial value in the aggregation" do
+      it "uses the initial value in the aggregation", transaction: false do
         expect(event_store.weighted_sum(initial_value:).round(5)).to eq(1000.02218)
       end
 
@@ -1070,7 +1083,7 @@ RSpec.describe Events::Stores::PostgresStore, type: :service do
         ]
       end
 
-      it "returns the weighted sum of event properties scoped to the group" do
+      it "returns the weighted sum of event properties scoped to the group", transaction: false do
         expect(event_store.weighted_sum.round(5)).to eq(1000.0)
       end
     end

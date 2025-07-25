@@ -36,6 +36,7 @@ module Types
 
       field :file_url, String, null: true
 
+      field :activity_logs, [Types::ActivityLogs::Object], null: true
       field :applied_taxes, [Types::CreditNotes::AppliedTaxes::Object]
       field :billing_entity, Types::BillingEntities::Object, null: false
       field :customer, Types::Customers::Object, null: false
@@ -85,7 +86,7 @@ module Types
       end
 
       def tax_provider_id
-        integration_customer = object.customer&.anrok_customer
+        integration_customer = object.customer&.tax_customer
         return nil unless integration_customer
 
         object.integration_resources.where(integration_id: integration_customer.integration_id).last&.external_id

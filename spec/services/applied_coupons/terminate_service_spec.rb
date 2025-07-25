@@ -18,6 +18,12 @@ RSpec.describe AppliedCoupons::TerminateService, type: :service do
       expect(result.applied_coupon).to be_terminated
     end
 
+    it "produces an activity log" do
+      described_class.call(applied_coupon:)
+
+      expect(Utils::ActivityLog).to have_produced("applied_coupon.deleted").with(applied_coupon)
+    end
+
     context "when applied coupon is already terminated" do
       before { applied_coupon.mark_as_terminated! }
 

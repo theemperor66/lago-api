@@ -57,6 +57,7 @@ module Types
       field :file_url, String, null: true
       field :metadata, [Types::Invoices::Metadata::Object], null: true
 
+      field :activity_logs, [Types::ActivityLogs::Object], null: true
       field :applied_taxes, [Types::Invoices::AppliedTaxes::Object]
       field :credit_notes, [Types::CreditNotes::Object], null: true
       field :error_details, [Types::ErrorDetails::Object], null: true
@@ -72,6 +73,7 @@ module Types
       field :integration_syncable, GraphQL::Types::Boolean, null: false
       field :payable_type, GraphQL::Types::String, null: false
       field :payments, [Types::Payments::Object], null: true
+      field :tax_provider_id, String, null: true
       field :tax_provider_voidable, GraphQL::Types::Boolean, null: false
 
       def payable_type
@@ -83,7 +85,7 @@ module Types
       end
 
       def payments
-        object.payments.order(updated_at: :desc)
+        object.payments.where.not(customer_id: nil).order(updated_at: :desc)
       end
 
       def integration_syncable
@@ -157,6 +159,18 @@ module Types
 
       def associated_active_wallet_present
         object.associated_active_wallet.present?
+      end
+
+      def tax_provider_id
+        integration_customer = object.customer&.tax_customer
+        return nil unless integration_customer
+
+        IntegrationResource.find_by(
+          integration: integration_customer.integration,
+          syncable_id: object.id,
+          syncable_type: "Invoice",
+          resource_type: :invoice
+        )&.external_id
       end
     end
   end

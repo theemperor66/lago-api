@@ -8,6 +8,11 @@ module Payments
       super
     end
 
+    activity_loggable(
+      action: "payment.recorded",
+      record: -> { result.payment }
+    )
+
     def call
       check_preconditions
       return result if result.error
@@ -17,6 +22,7 @@ module Payments
       ActiveRecord::Base.transaction do
         payment = invoice.payments.create!(
           organization_id: invoice.organization_id,
+          customer_id: invoice.customer_id,
           amount_cents:,
           reference: params[:reference],
           amount_currency: invoice.currency,
@@ -31,7 +37,7 @@ module Payments
 
         params = {total_paid_amount_cents:}
         params[:payment_status] = "succeeded" if total_paid_amount_cents == invoice.total_amount_cents
-        Invoices::UpdateService.call!(invoice:, params:)
+        Invoices::UpdateService.call!(invoice:, params:, webhook_notification: true)
       end
 
       after_commit do

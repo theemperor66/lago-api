@@ -11,13 +11,13 @@ module Mutations
       graphql_name "TerminateSubscription"
       description "Terminate a Subscription"
 
-      argument :id, ID, required: true
+      input_object_class Types::Subscriptions::TerminateSubscriptionInput
 
       type Types::Subscriptions::Object
 
-      def resolve(**args)
-        subscription = current_organization.subscriptions.find_by(id: args[:id])
-        result = ::Subscriptions::TerminateService.call(subscription:)
+      def resolve(id:, **args)
+        subscription = current_organization.subscriptions.find_by(id:)
+        result = ::Subscriptions::TerminateService.call(subscription:, **args.compact)
 
         result.success? ? result.subscription : result_error(result)
       end

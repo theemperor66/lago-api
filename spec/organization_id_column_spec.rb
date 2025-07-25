@@ -21,16 +21,6 @@ Rspec.describe "All tables must have an organization_id" do
       group_properties
       groups
       password_resets
-    ]
-  end
-
-  let(:tables_to_migrate) do
-    %w[
-      charge_filter_values
-      integration_collection_mappings
-      integration_items
-      recurring_transaction_rules
-      refunds
       versions
     ]
   end
@@ -59,6 +49,6 @@ Rspec.describe "All tables must have an organization_id" do
       .reject { |table| internal_tables.include?(table) || tables_to_skip.include?(table) }
       .sort
 
-    expect(tables_without_organization_id).to match_array(tables_to_migrate)
+    expect(tables_without_organization_id).to be_empty
   end
 end

@@ -8,7 +8,7 @@ RSpec.describe Invoices::ProgressiveBillingService, type: :service, transaction:
   let(:sorted_usage_thresholds) { [create(:usage_threshold, plan:)] }
   let(:plan) { create(:plan) }
   let(:organization) { plan.organization }
-
+  let(:billing_entity) { customer.billing_entity }
   let(:customer) { create(:customer, organization:) }
   let(:subscription) { create(:subscription, plan:, customer:, started_at: timestamp - 1.week) }
   let(:lifetime_usage) { create(:lifetime_usage, subscription:, organization:) }
@@ -137,6 +137,7 @@ RSpec.describe Invoices::ProgressiveBillingService, type: :service, transaction:
       before do
         invoice = create(
           :invoice,
+          :with_subscriptions,
           organization:,
           customer:,
           status: "finalized",
@@ -192,6 +193,12 @@ RSpec.describe Invoices::ProgressiveBillingService, type: :service, transaction:
     it "enqueue an GeneratePdfAndNotifyJob with email false" do
       expect { create_service.call }
         .to have_enqueued_job(Invoices::GeneratePdfAndNotifyJob).with(hash_including(email: false))
+    end
+
+    it "produces an activity log" do
+      invoice = described_class.call(sorted_usage_thresholds:, lifetime_usage:, timestamp:).invoice
+
+      expect(Utils::ActivityLog).to have_produced("invoice.created").with(invoice)
     end
 
     context "with lago_premium" do

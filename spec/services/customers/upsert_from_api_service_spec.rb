@@ -96,6 +96,12 @@ RSpec.describe Customers::UpsertFromApiService, type: :service do
     expect(SendWebhookJob).to have_received(:perform_later).with("customer.created", customer)
   end
 
+  it "produces an activity log" do
+    result = described_class.call(organization:, params: create_args)
+
+    expect(Utils::ActivityLog).to have_produced("customer.created").after_commit.with(result.customer)
+  end
+
   context "when organization has multiple billing entities" do
     let(:billing_entity_2) { create(:billing_entity, organization:) }
 

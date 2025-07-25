@@ -15,11 +15,11 @@ module V1
         pay_in_advance: model.pay_in_advance,
         prorated: model.prorated,
         min_amount_cents: model.min_amount_cents,
-        properties: model.properties
+        properties:,
+        applied_pricing_unit:
       }
 
       payload.merge!(charge_filters)
-
       payload.merge!(taxes) if include?(:taxes)
 
       payload
@@ -41,6 +41,29 @@ module V1
         ::V1::ChargeFilterSerializer,
         collection_name: "filters"
       ).serialize
+    end
+
+    def applied_pricing_unit
+      return if model.applied_pricing_unit.nil?
+
+      {
+        conversion_rate: model.applied_pricing_unit.conversion_rate,
+        code: model.pricing_unit.code
+      }
+    end
+
+    # TODO(pricing_group_keys): remove after deprecation of grouped_by
+    def properties
+      attributes = model.properties
+      if attributes["grouped_by"].present? && attributes["pricing_group_keys"].blank?
+        attributes["pricing_group_keys"] = attributes["grouped_by"]
+      end
+
+      if attributes["pricing_group_keys"].present? && attributes["grouped_by"].blank?
+        attributes["grouped_by"] = attributes["pricing_group_keys"]
+      end
+
+      attributes
     end
   end
 end

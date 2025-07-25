@@ -17,6 +17,7 @@ RSpec.describe Fees::ChargeService do
   let(:subscription) do
     create(
       :subscription,
+      organization:,
       status: :active,
       started_at: Time.zone.parse("2022-03-15"),
       customer:
@@ -107,6 +108,7 @@ RSpec.describe Fees::ChargeService do
         end
       end
 
+      # TODO(pricing_group_keys): remove after deprecation of grouped_by
       context "with grouped standard charge" do
         let(:charge) do
           create(
@@ -116,6 +118,202 @@ RSpec.describe Fees::ChargeService do
             properties: {
               amount: "20",
               grouped_by: ["cloud"]
+            }
+          )
+        end
+
+        let(:billable_metric) do
+          create(:billable_metric, organization:, aggregation_type: "sum_agg", field_name: "value")
+        end
+
+        context "without events" do
+          it "does not create a fee" do
+            result = charge_subscription_service.call
+            expect(result).to be_success
+            expect(result.fees.count).to eq(0)
+          end
+
+          context "when organization as zero_amount_fees premium integration" do
+            before do
+              organization.update!(premium_integrations: ["zero_amount_fees"])
+            end
+
+            it "creates a fee" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+              expect(result.fees.count).to eq(1)
+            end
+          end
+        end
+
+        context "with events" do
+          before do
+            create(
+              :event,
+              organization: subscription.organization,
+              subscription:,
+              code: charge.billable_metric.code,
+              timestamp: Time.zone.parse("2022-03-16"),
+              properties: {cloud: "aws", value: 10}
+            )
+
+            create(
+              :event,
+              organization: subscription.organization,
+              subscription:,
+              code: charge.billable_metric.code,
+              timestamp: Time.zone.parse("2022-03-16"),
+              properties: {cloud: "aws", value: 5}
+            )
+
+            create(
+              :event,
+              organization: subscription.organization,
+              subscription:,
+              code: charge.billable_metric.code,
+              timestamp: Time.zone.parse("2022-03-16"),
+              properties: {cloud: "gcp", value: 10}
+            )
+          end
+
+          it "creates a fee for each group" do
+            result = charge_subscription_service.call
+            expect(result).to be_success
+            expect(result.fees.count).to eq(2)
+
+            fee1 = result.fees.find { |f| f.grouped_by["cloud"] == "aws" }
+            expect(fee1).to have_attributes(
+              id: String,
+              invoice_id: invoice.id,
+              charge_id: charge.id,
+              amount_cents: 30_000,
+              precise_amount_cents: 30_000.0,
+              taxes_precise_amount_cents: 0.0,
+              amount_currency: "EUR",
+              units: 15,
+              unit_amount_cents: 2000,
+              precise_unit_amount: 20,
+              grouped_by: {"cloud" => "aws"}
+            )
+
+            fee2 = result.fees.find { |f| f.grouped_by["cloud"] == "gcp" }
+            expect(fee2).to have_attributes(
+              id: String,
+              invoice_id: invoice.id,
+              charge_id: charge.id,
+              amount_cents: 20_000,
+              precise_amount_cents: 20_000.0,
+              taxes_precise_amount_cents: 0.0,
+              amount_currency: "EUR",
+              units: 10,
+              unit_amount_cents: 2000,
+              precise_unit_amount: 20,
+              grouped_by: {"cloud" => "gcp"}
+            )
+          end
+
+          context "with adjusted fee" do
+            let(:adjusted_fee) do
+              create(
+                :adjusted_fee,
+                invoice:,
+                subscription:,
+                charge:,
+                properties:,
+                fee_type: :charge,
+                adjusted_units: true,
+                adjusted_amount: false,
+                units: 3,
+                grouped_by: {"cloud" => "aws"}
+              )
+            end
+
+            let(:properties) do
+              {
+                charges_from_datetime: boundaries[:charges_from_datetime],
+                charges_to_datetime: boundaries[:charges_to_datetime]
+              }
+            end
+
+            before do
+              adjusted_fee
+              invoice.draft!
+            end
+
+            it "creates a fee for each group" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+              expect(result.fees.count).to eq(2)
+
+              fee1 = result.fees.find { |f| f.grouped_by["cloud"] == "aws" }
+              expect(fee1).to have_attributes(
+                id: String,
+                invoice_id: invoice.id,
+                charge_id: charge.id,
+                amount_cents: 6_000,
+                precise_amount_cents: 6_000.0,
+                taxes_precise_amount_cents: 0.0,
+                amount_currency: "EUR",
+                units: 3,
+                unit_amount_cents: 2000,
+                precise_unit_amount: 20,
+                grouped_by: {"cloud" => "aws"}
+              )
+
+              fee2 = result.fees.find { |f| f.grouped_by["cloud"] == "gcp" }
+              expect(fee2).to have_attributes(
+                id: String,
+                invoice_id: invoice.id,
+                charge_id: charge.id,
+                amount_cents: 20_000,
+                precise_amount_cents: 20_000.0,
+                taxes_precise_amount_cents: 0.0,
+                amount_currency: "EUR",
+                units: 10,
+                unit_amount_cents: 2000,
+                precise_unit_amount: 20,
+                grouped_by: {"cloud" => "gcp"}
+              )
+            end
+          end
+
+          context "with recurring weighted sum aggregation" do
+            let(:billable_metric) { create(:weighted_sum_billable_metric, :recurring, organization:) }
+
+            it "creates a fee and a cached aggregation per group" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+
+              expect(result.fees.count).to eq(2)
+              expect(result.cached_aggregations.count).to eq(2)
+            end
+          end
+
+          context "with custom aggregation" do
+            let(:billable_metric) do
+              create(:custom_aggregation_billable_metric, organization:)
+
+              it "creates a fee and a cached aggregation" do
+                result = charge_subscription_service.call
+                expect(result).to be_success
+
+                expect(result.fees.count).to eq(2)
+                expect(result.cached_aggregation.count).to eq(2)
+              end
+            end
+          end
+        end
+      end
+
+      context "with pricing_group_keys and standard charge" do
+        let(:charge) do
+          create(
+            :standard_charge,
+            plan: subscription.plan,
+            billable_metric:,
+            properties: {
+              amount: "20",
+              pricing_group_keys: ["cloud"]
             }
           )
         end
@@ -433,21 +631,67 @@ RSpec.describe Fees::ChargeService do
             )
           end
 
-          it "creates fees" do
-            result = charge_subscription_service.call
-            expect(result).to be_success
-            expect(result.fees.first).to have_attributes(
-              id: String,
-              invoice_id: invoice.id,
-              charge_id: charge.id,
-              amount_cents: 2000,
-              precise_amount_cents: 2000.0,
-              taxes_precise_amount_cents: 0.0,
-              amount_currency: "EUR",
-              units: 1,
-              unit_amount_cents: 2000,
-              precise_unit_amount: 20
-            )
+          context "without pricing unit on the charge" do
+            it "creates fees" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+              expect(result.fees.first).to have_attributes(
+                id: String,
+                invoice_id: invoice.id,
+                charge_id: charge.id,
+                amount_cents: 2000,
+                precise_amount_cents: 2000.0,
+                taxes_precise_amount_cents: 0.0,
+                amount_currency: "EUR",
+                units: 1,
+                unit_amount_cents: 2000,
+                precise_unit_amount: 20
+              )
+            end
+
+            it "does not create pricing unit usage" do
+              expect { charge_subscription_service.call }.not_to change(PricingUnitUsage, :count)
+            end
+          end
+
+          context "with pricing unit on the charge" do
+            before do
+              create(
+                :applied_pricing_unit,
+                organization: subscription.organization,
+                conversion_rate: 0.25,
+                pricing_unitable: charge
+              )
+            end
+
+            it "creates fees" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+              expect(result.fees.first).to have_attributes(
+                id: String,
+                invoice_id: invoice.id,
+                charge_id: charge.id,
+                amount_cents: 500,
+                precise_amount_cents: 500.0,
+                taxes_precise_amount_cents: 0.0,
+                amount_currency: "EUR",
+                units: 1,
+                unit_amount_cents: 500,
+                precise_unit_amount: 5
+              )
+            end
+
+            it "creates pricing unit usage" do
+              result = charge_subscription_service.call
+              expect(result).to be_success
+              expect(result.fees.first.pricing_unit_usage)
+                .to be_persisted
+                .and have_attributes(
+                  amount_cents: 2000,
+                  precise_amount_cents: 2000.0,
+                  unit_amount_cents: 2000
+                )
+            end
           end
         end
       end
@@ -508,11 +752,11 @@ RSpec.describe Fees::ChargeService do
               aggregate_failures do
                 expect(result).to be_success
                 expect(result.fees.count).to eq(2)
-                expect(result.fees.pluck(:amount_cents)).to contain_exactly(6_000, 4_967)
+                expect(result.fees.pluck(:amount_cents)).to contain_exactly(6_000, 4_968)
                 expect(result.fees.pluck(:precise_amount_cents)).to contain_exactly(6_000.0, 4_967.74193548387)
                 expect(result.fees.pluck(:taxes_precise_amount_cents)).to contain_exactly(0.0, 0.0)
-                expect(result.fees.pluck(:unit_amount_cents)).to contain_exactly(2_000, 4_967)
-                expect(result.fees.pluck(:precise_unit_amount)).to contain_exactly(20, 49.67)
+                expect(result.fees.pluck(:unit_amount_cents)).to contain_exactly(2_000, 4_968)
+                expect(result.fees.pluck(:precise_unit_amount)).to contain_exactly(20, 49.6774193548387)
               end
             end
           end
@@ -772,14 +1016,33 @@ RSpec.describe Fees::ChargeService do
             charge.update!(min_amount_cents: 1000)
             result = charge_subscription_service.call
 
-            aggregate_failures do
+            expect(result).to be_success
+            expect(result.fees.count).to eq(2)
+            expect(result.fees.pluck(:amount_cents)).to contain_exactly(0, 548) # 548 is 1000 prorated for 17 days.
+            expect(result.fees.pluck(:precise_amount_cents)).to contain_exactly(0.0, 548.3870967741935) # 548 is 1000 prorated for 17 days.
+            expect(result.fees.pluck(:taxes_precise_amount_cents)).to contain_exactly(0.0, 0.0) # 548 is 1000 prorated for 17 days.
+            expect(result.fees.pluck(:unit_amount_cents)).to contain_exactly(0, 548)
+            expect(result.fees.pluck(:precise_unit_amount)).to contain_exactly(0, 5.483870967741935)
+          end
+        end
+
+        context "with charge using pricing units" do
+          before do
+            create(
+              :applied_pricing_unit,
+              organization: charge.organization,
+              conversion_rate: 1,
+              pricing_unitable: charge
+            )
+          end
+
+          it "persists pricing unit usages" do
+            travel_to(Time.zone.parse("2023-04-01")) do
+              charge.update!(min_amount_cents: 1000)
+              result = charge_subscription_service.call
+
               expect(result).to be_success
-              expect(result.fees.count).to eq(2)
-              expect(result.fees.pluck(:amount_cents)).to contain_exactly(0, 548) # 548 is 1000 prorated for 17 days.
-              expect(result.fees.pluck(:precise_amount_cents)).to contain_exactly(0.0, 548.3870967741935) # 548 is 1000 prorated for 17 days.
-              expect(result.fees.pluck(:taxes_precise_amount_cents)).to contain_exactly(0.0, 0.0) # 548 is 1000 prorated for 17 days.
-              expect(result.fees.pluck(:unit_amount_cents)).to contain_exactly(0, 548)
-              expect(result.fees.pluck(:precise_unit_amount)).to contain_exactly(0, 5.48)
+              expect(result.fees.map(&:pricing_unit_usage)).to all be_persisted
             end
           end
         end
@@ -1074,7 +1337,7 @@ RSpec.describe Fees::ChargeService do
       end
 
       context "when unique_count_agg" do
-        it "creates expected fees for unique_count_agg aggregation type" do
+        it "creates expected fees for unique_count_agg aggregation type", transaction: false do
           billable_metric.update!(aggregation_type: :unique_count_agg, field_name: "foo_bar")
           result = charge_subscription_service.call
           expect(result).to be_success
@@ -1553,13 +1816,13 @@ RSpec.describe Fees::ChargeService do
         )
       end
 
-      it "creates expected fees for count_agg aggregation type" do
-        billable_metric.update!(aggregation_type: :count_agg)
-        result = charge_subscription_service.call
-        expect(result).to be_success
-        created_fees = result.fees
+      context "without pricing unit on the charge" do
+        it "creates expected fees for count_agg aggregation type" do
+          billable_metric.update!(aggregation_type: :count_agg)
+          result = charge_subscription_service.call
+          expect(result).to be_success
+          created_fees = result.fees
 
-        aggregate_failures do
           expect(created_fees.count).to eq(3)
           expect(created_fees).to all(
             have_attributes(
@@ -1587,6 +1850,73 @@ RSpec.describe Fees::ChargeService do
             unit_amount_cents: 4,
             precise_unit_amount: 0.04
           )
+        end
+
+        it "does not create pricing unit usage" do
+          expect { charge_subscription_service.call }.not_to change(PricingUnitUsage, :count)
+        end
+      end
+
+      context "with pricing unit on the charge" do
+        before do
+          create(
+            :applied_pricing_unit,
+            organization: subscription.organization,
+            conversion_rate: 2,
+            pricing_unitable: charge
+          )
+        end
+
+        it "creates expected fees for count_agg aggregation type" do
+          billable_metric.update!(aggregation_type: :count_agg)
+          result = charge_subscription_service.call
+          expect(result).to be_success
+          created_fees = result.fees
+
+          expect(created_fees.count).to eq(3)
+          expect(created_fees).to all(
+            have_attributes(
+              invoice_id: invoice.id,
+              charge_id: charge.id,
+              amount_currency: "EUR"
+            )
+          )
+
+          expect(created_fees.first).to have_attributes(
+            charge_filter: europe_filter,
+            amount_cents: 6,
+            precise_amount_cents: 6.0,
+            taxes_precise_amount_cents: 0.0,
+            units: 2,
+            unit_amount_cents: 2,
+            precise_unit_amount: 0.02
+          )
+
+          expect(created_fees.first.pricing_unit_usage)
+            .to be_persisted
+            .and have_attributes(
+              amount_cents: 3,
+              precise_amount_cents: 3.0,
+              unit_amount_cents: 1
+            )
+
+          expect(created_fees.second).to have_attributes(
+            charge_filter: usa_filter,
+            amount_cents: 8,
+            precise_amount_cents: 8.0,
+            taxes_precise_amount_cents: 0.0,
+            units: 1,
+            unit_amount_cents: 8,
+            precise_unit_amount: 0.08
+          )
+
+          expect(created_fees.second.pricing_unit_usage)
+            .to be_persisted
+            .and have_attributes(
+              amount_cents: 4,
+              precise_amount_cents: 4.0,
+              unit_amount_cents: 4
+            )
         end
       end
     end

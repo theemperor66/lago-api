@@ -100,7 +100,9 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
   end
 
   before do
-    allow(LagoHttpClient::Client).to receive(:new).with(endpoint).and_return(lago_client)
+    allow(LagoHttpClient::Client).to receive(:new)
+      .with(endpoint, retries_on: [OpenSSL::SSL::SSLError])
+      .and_return(lago_client)
 
     integration_customer
     integration_collection_mapping1
@@ -143,6 +145,10 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
 
           expect(integration_customer.reload.external_customer_id).to eq(customer.external_id)
         end
+
+        it "does not create integration resource" do
+          expect { service_call }.not_to change { invoice.reload.integration_resources.count }
+        end
       end
 
       context "when Avalara taxes are successfully fetched for finalized invoice" do
@@ -180,14 +186,14 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
                   "item_id" => fee_add_on.id,
                   "item_code" => "m1",
                   "unit" => 0.00,
-                  "amount" => 2.00
+                  "amount" => "2.0"
                 },
                 {
                   "item_key" => fee_add_on_two.item_key,
                   "item_id" => fee_add_on_two.id,
                   "item_code" => "1",
                   "unit" => 0.00,
-                  "amount" => 2.00
+                  "amount" => "2.0"
                 }
               ]
             }
@@ -218,6 +224,10 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
           end
         end
 
+        it "creates integration resource" do
+          expect { service_call }.to change { invoice.reload.integration_resources.count }.by(1)
+        end
+
         context "when invoice is voided" do
           let(:params) do
             [
@@ -244,22 +254,22 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
                   "region" => customer.billing_entity&.state,
                   "country" => customer.billing_entity&.country
                 },
-                "fees" => [
+                "fees" => an_array_matching([
                   {
                     "item_key" => fee_add_on.item_key,
                     "item_id" => fee_add_on.id,
                     "item_code" => "m1",
                     "unit" => 0.00,
-                    "amount" => -2.00
+                    "amount" => "-2.0"
                   },
                   {
                     "item_key" => fee_add_on_two.item_key,
                     "item_id" => fee_add_on_two.id,
                     "item_code" => "1",
                     "unit" => 0.00,
-                    "amount" => -2.00
+                    "amount" => "-2.0"
                   }
-                ]
+                ])
               }
             ]
           end
@@ -318,7 +328,7 @@ RSpec.describe Integrations::Aggregator::Taxes::Invoices::CreateService do
           end
 
           it "raises an HTTP error" do
-            expect { service_call }.to raise_error(LagoHttpClient::HttpError)
+            expect { service_call }.to raise_error(Integrations::Aggregator::BadGatewayError)
           end
         end
       end

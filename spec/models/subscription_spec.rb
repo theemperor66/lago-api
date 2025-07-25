@@ -9,13 +9,132 @@ RSpec.describe Subscription, type: :model do
 
   it_behaves_like "paper_trail traceable"
 
-  it { is_expected.to have_many(:daily_usages) }
-  it { is_expected.to have_many(:integration_resources) }
-  it { is_expected.to have_one(:lifetime_usage) }
-  it { is_expected.to have_many(:usage_thresholds).through(:plan) }
+  describe "enums" do
+    it do
+      expect(subject).to define_enum_for(:status).with_values(
+        pending: 0,
+        active: 1,
+        terminated: 2,
+        canceled: 3
+      )
+      expect(subject).to define_enum_for(:billing_time).with_values(
+        calendar: 0,
+        anniversary: 1
+      )
+      expect(subject).to define_enum_for(:on_termination_credit_note)
+        .backed_by_column_of_type(:enum)
+        .with_values(credit: "credit", skip: "skip")
+        .with_prefix(:on_termination_credit_note)
+      expect(subject).to define_enum_for(:on_termination_invoice)
+        .backed_by_column_of_type(:enum)
+        .with_values(generate: "generate", skip: "skip")
+        .with_prefix(:on_termination_invoice)
+    end
+  end
+
+  describe "associations" do
+    it do
+      expect(subject).to belong_to(:customer)
+      expect(subject).to belong_to(:plan)
+      expect(subject).to belong_to(:previous_subscription).optional
+      expect(subject).to belong_to(:organization)
+      expect(subject).to have_one(:billing_entity).through(:customer)
+      expect(subject).to have_many(:next_subscriptions).class_name("Subscription").with_foreign_key(:previous_subscription_id)
+      expect(subject).to have_many(:events)
+      expect(subject).to have_many(:invoice_subscriptions)
+      expect(subject).to have_many(:invoices).through(:invoice_subscriptions)
+      expect(subject).to have_many(:integration_resources)
+      expect(subject).to have_many(:fees)
+      expect(subject).to have_many(:daily_usages)
+      expect(subject).to have_many(:usage_thresholds).through(:plan)
+      expect(subject).to have_one(:lifetime_usage).autosave(true)
+      expect(subject).to have_one(:subscription_activity).class_name("UsageMonitoring::SubscriptionActivity")
+      expect(subject).to have_many(:entitlements).class_name("Entitlement::Entitlement")
+    end
+  end
 
   describe "Clickhouse associations", clickhouse: true do
-    it { is_expected.to have_many(:activity_logs).class_name("Clickhouse::ActivityLog") }
+    it do
+      expect(subject).to have_many(:activity_logs).class_name("Clickhouse::ActivityLog")
+    end
+  end
+
+  describe "Scopes" do
+    describe ".starting_in_the_future" do
+      let(:organization) { create(:organization) }
+      let(:customer) { create(:customer, organization:) }
+      let!(:pending_subscription_without_previous) { create(:subscription, :pending, customer:) }
+
+      before do
+        create(:subscription, :with_previous_subscription, :pending, customer:)
+        create(:subscription, :active, customer:)
+      end
+
+      it "returns only pending subscriptions without previous subscription" do
+        result = described_class.starting_in_the_future
+
+        expect(result).to match_array([pending_subscription_without_previous])
+      end
+    end
+  end
+
+  describe "validations" do
+    it do
+      expect(subject).to validate_presence_of(:external_id)
+      expect(subject).to validate_presence_of(:billing_time)
+    end
+
+    describe "on_termination_credit_note validation" do
+      context "when plan is pay in arrears" do
+        subject(:subscription) { build(:subscription) }
+
+        it { is_expected.to validate_absence_of(:on_termination_credit_note) }
+      end
+
+      context "when plan is pay in advance" do
+        subject(:subscription) { build(:subscription, plan: create(:plan, :pay_in_advance)) }
+
+        it { is_expected.to be_valid }
+      end
+    end
+
+    describe "external_id validation" do
+      let(:organization) { create(:organization) }
+      let(:customer) { create(:customer, organization:) }
+      let(:external_id) { SecureRandom.uuid }
+      let(:subscription) do
+        create(
+          :subscription,
+          plan:,
+          customer: create(:customer, organization:)
+        )
+      end
+
+      let(:new_subscription) do
+        build(
+          :subscription,
+          plan:,
+          external_id:,
+          customer: create(:customer, organization:)
+        )
+      end
+
+      before { subscription }
+
+      context "when external_id is unique" do
+        it "does not raise validation error if external_id is unique" do
+          expect(new_subscription).to be_valid
+        end
+      end
+
+      context "when external_id is NOT unique" do
+        let(:external_id) { subscription.external_id }
+
+        it "raises validation error" do
+          expect(new_subscription).not_to be_valid
+        end
+      end
+    end
   end
 
   describe "#upgraded?" do
@@ -104,10 +223,8 @@ RSpec.describe Subscription, type: :model do
     it "returns the trial end date" do
       trial_end_date = subscription.trial_end_date
 
-      aggregate_failures do
-        expect(trial_end_date).to be_present
-        expect(trial_end_date).to eq(subscription.started_at.to_date + 3.days)
-      end
+      expect(trial_end_date).to be_present
+      expect(trial_end_date).to eq(subscription.started_at.to_date + 3.days)
     end
 
     context "when plan has no trial" do
@@ -136,10 +253,8 @@ RSpec.describe Subscription, type: :model do
       it "takes previous subscription started_at into account" do
         trial_end_date = subscription.trial_end_date
 
-        aggregate_failures do
-          expect(trial_end_date).to be_present
-          expect(trial_end_date).to eq(previous_subscription.started_at.to_date + 3.days)
-        end
+        expect(trial_end_date).to be_present
+        expect(trial_end_date).to eq(previous_subscription.started_at.to_date + 3.days)
       end
     end
   end
@@ -151,10 +266,8 @@ RSpec.describe Subscription, type: :model do
     it "returns the trial end datetime" do
       trial_end_datetime = subscription.trial_end_datetime
 
-      aggregate_failures do
-        expect(trial_end_datetime).to be_present
-        expect(trial_end_datetime).to eq(started_at + 3.days)
-      end
+      expect(trial_end_datetime).to be_present
+      expect(trial_end_datetime).to eq(started_at + 3.days)
     end
 
     context "when plan has no trial" do
@@ -183,10 +296,8 @@ RSpec.describe Subscription, type: :model do
       it "takes previous subscription started_at into account" do
         trial_end_datetime = subscription.trial_end_datetime
 
-        aggregate_failures do
-          expect(trial_end_datetime).to be_present
-          expect(trial_end_datetime).to eq(started_at + 3.days)
-        end
+        expect(trial_end_datetime).to be_present
+        expect(trial_end_datetime).to eq(started_at + 3.days)
       end
     end
   end
@@ -273,44 +384,6 @@ RSpec.describe Subscription, type: :model do
     end
   end
 
-  describe "#valid_external_id" do
-    let(:organization) { create(:organization) }
-    let(:customer) { create(:customer, organization:) }
-    let(:external_id) { SecureRandom.uuid }
-    let(:subscription) do
-      create(
-        :subscription,
-        plan:,
-        customer: create(:customer, organization:)
-      )
-    end
-
-    let(:new_subscription) do
-      build(
-        :subscription,
-        plan:,
-        external_id:,
-        customer: create(:customer, organization:)
-      )
-    end
-
-    before { subscription }
-
-    context "when external_id is unique" do
-      it "does not raise validation error if external_id is unique" do
-        expect(new_subscription).to be_valid
-      end
-    end
-
-    context "when external_id is NOT unique" do
-      let(:external_id) { subscription.external_id }
-
-      it "raises validation error" do
-        expect(new_subscription).not_to be_valid
-      end
-    end
-  end
-
   describe "#downgrade_plan_date" do
     let(:subscription) { create(:subscription) }
 
@@ -383,7 +456,7 @@ RSpec.describe Subscription, type: :model do
   describe "#invoice_name" do
     subject(:subscription_invoice_name) { subscription.invoice_name }
 
-    let(:subscription) { build_stubbed(:subscription, plan:, name:) }
+    let(:subscription) { build(:subscription, plan:, name:, organization: plan.organization) }
 
     context "when plan invoice display name is blank" do
       let(:plan) { build_stubbed(:plan, invoice_display_name: [nil, ""].sample) }
@@ -626,13 +699,13 @@ RSpec.describe Subscription, type: :model do
   describe "#next_subscription" do
     subject { subscription.next_subscription }
 
-    let(:subscription) { build_stubbed(:subscription, next_subscriptions:) }
+    let(:subscription) { build(:subscription, next_subscriptions:, organization: plan.organization) }
 
     let(:next_subscriptions) do
       [
-        build_stubbed(:subscription, :canceled),
-        build_stubbed(:subscription, created_at: 1.day.ago),
-        build_stubbed(:subscription, created_at: 2.days.ago)
+        build(:subscription, :canceled, organization: plan.organization),
+        build(:subscription, created_at: 1.day.ago, organization: plan.organization),
+        build(:subscription, created_at: 2.days.ago, organization: plan.organization)
       ]
     end
 

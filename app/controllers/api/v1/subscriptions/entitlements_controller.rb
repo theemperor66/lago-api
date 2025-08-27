@@ -11,16 +11,16 @@ module Api
 
         def index
           render(
-            json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
+            json: ::CollectionSerializer.new(
               Entitlement::SubscriptionEntitlement.for_subscription(subscription),
+              ::V1::Entitlement::SubscriptionEntitlementSerializer,
               collection_name: "entitlements"
-            ).serialize
+            )
           )
         end
 
         def update
           result = ::Entitlement::SubscriptionEntitlementsUpdateService.call(
-            organization: current_organization,
             subscription: subscription,
             entitlements_params: update_params,
             partial: true
@@ -28,10 +28,11 @@ module Api
 
           if result.success?
             render(
-              json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
+              json: ::CollectionSerializer.new(
                 Entitlement::SubscriptionEntitlement.for_subscription(subscription),
+                ::V1::Entitlement::SubscriptionEntitlementSerializer,
                 collection_name: "entitlements"
-              ).serialize
+              )
             )
           else
             render_error_response(result)
@@ -39,49 +40,15 @@ module Api
         end
 
         def destroy
-          result = ::Entitlement::SubscriptionEntitlementDestroyService.call(subscription:, code: params[:code])
+          result = ::Entitlement::SubscriptionFeatureRemoveService.call(subscription:, feature_code: params[:code])
 
           if result.success?
             render(
-              json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
+              json: ::CollectionSerializer.new(
                 Entitlement::SubscriptionEntitlement.for_subscription(subscription),
+                ::V1::Entitlement::SubscriptionEntitlementSerializer,
                 collection_name: "entitlements"
-              ).serialize
-            )
-          else
-            render_error_response(result)
-          end
-        end
-
-        def remove
-          feature = current_organization.features.find_by(code: params[:code])
-
-          result = ::Entitlement::SubscriptionFeatureRemovalCreateService.call(subscription:, feature:)
-
-          if result.success?
-            render(
-              json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
-                Entitlement::SubscriptionEntitlement.for_subscription(subscription),
-                collection_name: "entitlements"
-              ).serialize
-            )
-          else
-            render_error_response(result)
-          end
-        end
-
-        def restore
-          feature = current_organization.features.find_by(code: params[:code])
-          return not_found_error(resource: "feature") unless feature
-
-          result = ::Entitlement::SubscriptionFeatureRemovalDestroyService.call(subscription:, feature:)
-
-          if result.success?
-            render(
-              json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
-                Entitlement::SubscriptionEntitlement.for_subscription(subscription),
-                collection_name: "entitlements"
-              ).serialize
+              )
             )
           else
             render_error_response(result)

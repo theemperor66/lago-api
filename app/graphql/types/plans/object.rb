@@ -11,6 +11,7 @@ module Types
       field :amount_cents, GraphQL::Types::BigInt, null: false
       field :amount_currency, Types::CurrencyEnum, null: false
       field :bill_charges_monthly, Boolean
+      field :bill_fixed_charges_monthly, Boolean
       field :code, String, null: false
       field :description, String
       field :interval, Types::Plans::IntervalEnum, null: false
@@ -26,12 +27,14 @@ module Types
 
       field :activity_logs, [Types::ActivityLogs::Object], null: true
       field :charges, [Types::Charges::Object]
+      field :fixed_charges, [Types::FixedCharges::Object]
       field :taxes, [Types::Taxes::Object]
 
       field :has_active_subscriptions, Boolean, null: false
       field :has_charges, Boolean, null: false
       field :has_customers, Boolean, null: false
       field :has_draft_invoices, Boolean, null: false
+      field :has_fixed_charges, Boolean, null: false
       field :has_overridden_plans, Boolean
       field :has_subscriptions, Boolean, null: false
 
@@ -46,12 +49,20 @@ module Types
       field :is_overridden, Boolean, null: false
       field :subscriptions_count, Integer, null: false
 
+      def entitlements
+        object.entitlements.order(:created_at)
+      end
+
       def usage_thresholds
         object.usage_thresholds.order(amount_cents: :asc)
       end
 
       def charges
         object.charges.includes(filters: {values: :billable_metric_filter}).order(created_at: :asc)
+      end
+
+      def fixed_charges
+        object.fixed_charges.order(created_at: :asc)
       end
 
       def charges_count
@@ -80,6 +91,10 @@ module Types
       # NOTE: should this one include children charges?
       def has_charges
         object.charges.exists?
+      end
+
+      def has_fixed_charges
+        object.fixed_charges.exists?
       end
 
       # NOTE: if it has active subscriptions, it has customers

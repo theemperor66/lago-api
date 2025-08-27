@@ -34,6 +34,7 @@ fr:
     due_date: Date d'échéance le %{date}
     fee_prorated: Les frais sont calculés au prorata des jours d'utilisation, le prix unitaire affiché est une moyenne
     fees_from_to_date: Frais de conso. du %{from_date} au %{to_date}
+    from_to_date: Du %{from_date} au %{to_date}
     graduated:
       fee_per_unit_for_the_first: Frais par unité pour les %{to} premières
       fee_per_unit_for_the_last: Frais par unité pour %{from} et plus
@@ -41,6 +42,7 @@ fr:
       flat_fee_for_the_first: Frais fixes pour les %{to} premières
       flat_fee_for_the_last: Frais fixes pour %{from} et plus
       flat_fee_for_the_next: Frais fixes pour les suivantes de %{from} à %{to}
+    half_year: semestre
     iban: IBAN
     invoice_number: Nº de facture
     issue_date: Date d'émission
@@ -79,6 +81,7 @@ fr:
     self_billed:
       document_name: Facture d'autofacturation
       footer: Cette facture d'autofacturation a été émise par le client au nom du partenaire, avec son consentement. Le partenaire a accepté de ne pas établir sa propre facture pour cette transaction.
+    semiannual: Semestriel
     sort_code: Code de tri
     sub_total: Sous total
     sub_total_with_tax: Sous total (TTC)

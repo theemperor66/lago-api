@@ -15,7 +15,7 @@ module Mutations
 
       type Types::Subscriptions::Object
 
-      def resolve(**args)
+      def resolve(entitlements: nil, **args)
         customer = Customer.find_by(
           id: args[:customer_id],
           organization_id: current_organization.id
@@ -32,7 +32,11 @@ module Mutations
           params: args.merge(external_id: args[:external_id] || SecureRandom.uuid)
         )
 
-        result.success? ? result.subscription : result_error(result)
+        return result_error(result) unless result.success?
+
+        subscription = result.subscription
+
+        result.success? ? subscription.reload : result_error(result)
       end
     end
   end

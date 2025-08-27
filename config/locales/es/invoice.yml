@@ -33,6 +33,7 @@ es:
     due_date: Vence el %{date}
     fee_prorated: La tarifa se prorratea según los días de uso, el precio unitario mostrado es un promedio
     fees_from_to_date: Cargos desde %{from_date} hasta %{to_date}
+    from_to_date: Desde %{from_date} hasta %{to_date}
     graduated:
       fee_per_unit_for_the_first: Tarifa por unidad para las %{to} primeras
       fee_per_unit_for_the_last: Tarifa por unidad para %{from} y superiores
@@ -40,6 +41,7 @@ es:
       flat_fee_for_the_first: Tarifa fija para las %{to} primeras
       flat_fee_for_the_last: Tarifa fija para %{from} y superiores
       flat_fee_for_the_next: Tarifa fija para las siguientes de %{from} a %{to}
+    half_year: semestre
     iban: IBAN
     invoice_number: Número de la factura
     issue_date: Fecha de emisión
@@ -78,6 +80,7 @@ es:
     self_billed:
       document_name: Factura de autoliquidación
       footer: Esta factura de autoliquidación ha sido emitida por el cliente en nombre del socio, con su consentimiento. El socio ha aceptado no emitir su propia factura para esta transacción.
+    semiannual: Semestral
     sort_code: Código de clasificación
     sub_total: Subtotal
     sub_total_with_tax: Subtotal (impuestos incl.)

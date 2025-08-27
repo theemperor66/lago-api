@@ -34,6 +34,7 @@ nb:
     due_date: Forfallsdato %{date}
     fee_prorated: Avgiften beregnes forholdsmessig etter brukerdager, den viste enhetsprisen er et gjennomsnitt
     fees_from_to_date: Gebyrer fra %{from_date} til %{to_date}
+    from_to_date: Fra %{from_date} til %{to_date}
     graduated:
       fee_per_unit_for_the_first: Avgift per enhet for de første %{to}
       fee_per_unit_for_the_last: Avgift per enhet for %{from} og mer
@@ -41,6 +42,7 @@ nb:
       flat_fee_for_the_first: Fast avgift for de første %{to}
       flat_fee_for_the_last: Fast avgift for %{from} og mer
       flat_fee_for_the_next: Fast avgift for de neste %{from} til %{to}
+    half_year: halvår
     iban: IBAN
     invoice_number: Fakturanummer
     issue_date: Dato
@@ -79,6 +81,7 @@ nb:
     self_billed:
       document_name: Egenfakturering
       footer: Denne egenfakturaen ble utstedt av kunden på vegne av partneren, med deres samtykke. Partneren har gått med på å ikke utstede sin egen faktura for denne transaksjonen.
+    semiannual: Halvårlig
     sort_code: Sorteringskode
     sub_total: Sub total
     sub_total_with_tax: Sub total (inkl. MVA)

@@ -9,13 +9,21 @@ module Entitlement
         return value if value.nil?
 
         if privilege.value_type == "select"
-          unless privilege.config.dig("select_options").include?(value)
-            raise BaseService::ValidationFailure.new(result, messages: {"#{privilege.code}_privilege_value": ["value_not_in_select_options"]})
+          if privilege.config.dig("select_options").include?(value)
+            return value
           end
+
+          raise BaseService::ValidationFailure.new(result, messages: {"#{privilege.code}_privilege_value": ["value_not_in_select_options"]})
         end
 
-        return value if privilege.value_type == "boolean" && [true, false].include?(value)
-        return value if privilege.value_type == "integer" && value.is_a?(Integer)
+        if privilege.value_type == "boolean" && [true, false, "true", "false"].include?(value)
+          return value
+        end
+
+        if privilege.value_type == "integer"
+          return value if value.is_a?(Integer)
+          return value if value.is_a?(String) && value.to_i.to_s == value
+        end
         return value if privilege.value_type == "string" && value.is_a?(String)
 
         raise BaseService::ValidationFailure.new(result, messages: {"#{privilege.code}_privilege_value": ["value_is_invalid"]})

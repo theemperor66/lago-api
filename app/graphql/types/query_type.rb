@@ -32,6 +32,7 @@ module Types
     field :current_version, resolver: Resolvers::VersionResolver
     field :customer, resolver: Resolvers::CustomerResolver
     field :customer_invoices, resolver: Resolvers::Customers::InvoicesResolver
+    field :customer_portal_customer_projected_usage, resolver: Resolvers::CustomerPortal::Customers::ProjectedUsageResolver
     field :customer_portal_customer_usage, resolver: Resolvers::CustomerPortal::Customers::UsageResolver
     field :customer_portal_invoice_collections, resolver: Resolvers::CustomerPortal::Analytics::InvoiceCollectionsResolver
     field :customer_portal_invoices, resolver: Resolvers::CustomerPortal::InvoicesResolver
@@ -41,6 +42,7 @@ module Types
     field :customer_portal_subscriptions, resolver: Resolvers::CustomerPortal::SubscriptionsResolver
     field :customer_portal_user, resolver: Resolvers::CustomerPortal::CustomerResolver
     field :customer_portal_wallets, resolver: Resolvers::CustomerPortal::WalletsResolver
+    field :customer_projected_usage, resolver: Resolvers::Customers::ProjectedUsageResolver
     field :customer_usage, resolver: Resolvers::Customers::UsageResolver
     field :customers, resolver: Resolvers::CustomersResolver
     field :dunning_campaign, resolver: Resolvers::DunningCampaignResolver
@@ -83,6 +85,8 @@ module Types
     field :pricing_unit, resolver: Resolvers::PricingUnitResolver
     field :pricing_units, resolver: Resolvers::PricingUnitsResolver
     field :subscription, resolver: Resolvers::SubscriptionResolver
+    field :subscription_entitlement, resolver: Resolvers::Entitlement::SubscriptionEntitlementResolver
+    field :subscription_entitlements, resolver: Resolvers::Entitlement::SubscriptionEntitlementsResolver
     field :subscriptions, resolver: Resolvers::SubscriptionsResolver
     field :tax, resolver: Resolvers::TaxResolver
     field :taxes, resolver: Resolvers::TaxesResolver

@@ -10,7 +10,7 @@ module Api
           before_action :find_subscription
 
           def destroy
-            result = ::Entitlement::SubscriptionEntitlementPrivilegeDestroyService.call(
+            result = ::Entitlement::SubscriptionFeaturePrivilegeRemoveService.call(
               subscription:,
               feature_code: params[:entitlement_code],
               privilege_code: params[:code]
@@ -18,10 +18,11 @@ module Api
 
             if result.success?
               render(
-                json: ::V1::Entitlement::SubscriptionEntitlementsCollectionSerializer.new(
+                json: ::CollectionSerializer.new(
                   Entitlement::SubscriptionEntitlement.for_subscription(subscription),
+                  ::V1::Entitlement::SubscriptionEntitlementSerializer,
                   collection_name: "entitlements"
-                ).serialize
+                )
               )
             else
               render_error_response(result)

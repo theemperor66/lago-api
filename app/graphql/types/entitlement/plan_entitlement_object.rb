@@ -8,7 +8,7 @@ module Types
       field :code, String, null: false
       field :description, String, null: true
       field :name, String, null: false
-      field :privileges, [PlanEntitlementPrivilegeObject], null: false, method: :values
+      field :privileges, [PlanEntitlementPrivilegeObject], null: false
 
       def code
         object.feature.code
@@ -20,6 +20,10 @@ module Types
 
       def description
         object.feature.description
+      end
+
+      def privileges
+        object.values.order(:created_at)
       end
     end
   end

@@ -298,6 +298,7 @@ DROP INDEX IF EXISTS public.index_unique_transaction_id;
 DROP INDEX IF EXISTS public.index_unique_terminating_invoice_subscription;
 DROP INDEX IF EXISTS public.index_unique_starting_invoice_subscription;
 DROP INDEX IF EXISTS public.index_unique_applied_to_organization_per_organization;
+DROP INDEX IF EXISTS public.index_uniq_invoice_subscriptions_on_fixed_charges_boundaries;
 DROP INDEX IF EXISTS public.index_uniq_invoice_subscriptions_on_charges_from_to_datetime;
 DROP INDEX IF EXISTS public.index_taxes_on_organization_id;
 DROP INDEX IF EXISTS public.index_taxes_on_code_and_organization_id;
@@ -637,6 +638,8 @@ DROP INDEX IF EXISTS public.idx_unique_feature_per_subscription;
 DROP INDEX IF EXISTS public.idx_unique_feature_per_plan;
 DROP INDEX IF EXISTS public.idx_subscription_unique;
 DROP INDEX IF EXISTS public.idx_privileges_code_unique_per_feature;
+DROP INDEX IF EXISTS public.idx_pay_in_advance_duplication_guard_charge_filter;
+DROP INDEX IF EXISTS public.idx_pay_in_advance_duplication_guard_charge;
 DROP INDEX IF EXISTS public.idx_on_usage_threshold_id_invoice_id_cb82cdf163;
 DROP INDEX IF EXISTS public.idx_on_usage_monitoring_alert_id_recurring_756a2a370d;
 DROP INDEX IF EXISTS public.idx_on_usage_monitoring_alert_id_78eb24d06c;
@@ -646,7 +649,6 @@ DROP INDEX IF EXISTS public.idx_on_subscription_id_fixed_charge_id_d85b30a9bf;
 DROP INDEX IF EXISTS public.idx_on_subscription_id_bd763c5aa3;
 DROP INDEX IF EXISTS public.idx_on_subscription_id_295edd8bb3;
 DROP INDEX IF EXISTS public.idx_on_plan_id_billable_metric_id_pay_in_advance_4a205974cb;
-DROP INDEX IF EXISTS public.idx_on_pay_in_advance_event_transaction_id_charge_i_16302ca167;
 DROP INDEX IF EXISTS public.idx_on_organization_id_organization_sequential_id_2387146f54;
 DROP INDEX IF EXISTS public.idx_on_organization_id_external_subscription_id_df3a30d96d;
 DROP INDEX IF EXISTS public.idx_on_organization_id_e742f77454;
@@ -2535,7 +2537,8 @@ CREATE TABLE public.fees (
     organization_id uuid NOT NULL,
     billing_entity_id uuid NOT NULL,
     precise_credit_notes_amount_cents numeric(30,5) DEFAULT 0.0 NOT NULL,
-    fixed_charge_id uuid
+    fixed_charge_id uuid,
+    duplicated_in_advance boolean DEFAULT false
 );
 
 
@@ -2756,7 +2759,9 @@ CREATE TABLE public.invoice_subscriptions (
     charges_to_datetime timestamp(6) without time zone,
     invoicing_reason public.subscription_invoicing_reason,
     organization_id uuid NOT NULL,
-    regenerated_invoice_id uuid
+    regenerated_invoice_id uuid,
+    fixed_charges_from_datetime timestamp(6) without time zone,
+    fixed_charges_to_datetime timestamp(6) without time zone
 );
 
 
@@ -3222,7 +3227,8 @@ CREATE TABLE public.wallet_transactions (
     failed_at timestamp(6) without time zone,
     organization_id uuid NOT NULL,
     lock_version integer DEFAULT 0 NOT NULL,
-    priority integer DEFAULT 50 NOT NULL
+    priority integer DEFAULT 50 NOT NULL,
+    name character varying(255)
 );
 
 
@@ -3301,7 +3307,9 @@ CREATE TABLE public.wallets (
     ready_to_be_refreshed boolean DEFAULT false NOT NULL,
     organization_id uuid NOT NULL,
     allowed_fee_types character varying[] DEFAULT '{}'::character varying[] NOT NULL,
-    last_ongoing_balance_sync_at timestamp without time zone
+    last_ongoing_balance_sync_at timestamp without time zone,
+    paid_top_up_min_amount_cents integer,
+    paid_top_up_max_amount_cents integer
 );
 
 
@@ -3841,7 +3849,8 @@ CREATE TABLE public.recurring_transaction_rules (
     expiration_at timestamp(6) without time zone,
     terminated_at timestamp(6) without time zone,
     status integer DEFAULT 0,
-    organization_id uuid NOT NULL
+    organization_id uuid NOT NULL,
+    ignore_paid_top_up_limits boolean DEFAULT false NOT NULL
 );
 
 
@@ -5159,13 +5168,6 @@ CREATE INDEX idx_on_organization_id_organization_sequential_id_2387146f54 ON pub
 
 
 --
--- Name: idx_on_pay_in_advance_event_transaction_id_charge_i_16302ca167; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_on_pay_in_advance_event_transaction_id_charge_i_16302ca167 ON public.fees USING btree (pay_in_advance_event_transaction_id, charge_id, charge_filter_id) WHERE ((created_at > '2025-01-21 00:00:00'::timestamp without time zone) AND (pay_in_advance_event_transaction_id IS NOT NULL) AND (pay_in_advance = true));
-
-
---
 -- Name: idx_on_plan_id_billable_metric_id_pay_in_advance_4a205974cb; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5226,6 +5228,20 @@ CREATE UNIQUE INDEX idx_on_usage_monitoring_alert_id_recurring_756a2a370d ON pub
 --
 
 CREATE UNIQUE INDEX idx_on_usage_threshold_id_invoice_id_cb82cdf163 ON public.applied_usage_thresholds USING btree (usage_threshold_id, invoice_id);
+
+
+--
+-- Name: idx_pay_in_advance_duplication_guard_charge; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_pay_in_advance_duplication_guard_charge ON public.fees USING btree (pay_in_advance_event_transaction_id, charge_id) WHERE ((deleted_at IS NULL) AND (charge_filter_id IS NULL) AND (pay_in_advance_event_transaction_id IS NOT NULL) AND (pay_in_advance = true) AND (duplicated_in_advance = false));
+
+
+--
+-- Name: idx_pay_in_advance_duplication_guard_charge_filter; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_pay_in_advance_duplication_guard_charge_filter ON public.fees USING btree (pay_in_advance_event_transaction_id, charge_id, charge_filter_id) WHERE ((deleted_at IS NULL) AND (charge_filter_id IS NOT NULL) AND (pay_in_advance_event_transaction_id IS NOT NULL) AND (pay_in_advance = true) AND (duplicated_in_advance = false));
 
 
 --
@@ -7602,6 +7618,13 @@ CREATE UNIQUE INDEX index_uniq_invoice_subscriptions_on_charges_from_to_datetime
 
 
 --
+-- Name: index_uniq_invoice_subscriptions_on_fixed_charges_boundaries; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_uniq_invoice_subscriptions_on_fixed_charges_boundaries ON public.invoice_subscriptions USING btree (subscription_id, fixed_charges_from_datetime, fixed_charges_to_datetime) WHERE ((recurring IS TRUE) AND (regenerated_invoice_id IS NULL));
+
+
+--
 -- Name: index_unique_applied_to_organization_per_organization; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -9746,6 +9769,13 @@ ALTER TABLE ONLY public.fixed_charges_taxes
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20250911111448'),
+('20250908085959'),
+('20250903165724'),
+('20250901141844'),
+('20250828153138'),
+('20250828144553'),
+('20250828142848'),
 ('20250826081205'),
 ('20250822100111'),
 ('20250821094638'),
@@ -10560,4 +10590,3 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20220530091046'),
 ('20220526101535'),
 ('20220525122759');
-

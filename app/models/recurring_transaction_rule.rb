@@ -53,6 +53,7 @@ end
 #  id                                  :uuid             not null, primary key
 #  expiration_at                       :datetime
 #  granted_credits                     :decimal(30, 5)   default(0.0), not null
+#  ignore_paid_top_up_limits           :boolean          default(FALSE), not null
 #  interval                            :integer          default("weekly")
 #  invoice_requires_successful_payment :boolean          default(FALSE), not null
 #  method                              :integer          default("fixed"), not null
@@ -63,6 +64,7 @@ end
 #  terminated_at                       :datetime
 #  threshold_credits                   :decimal(30, 5)   default(0.0)
 #  transaction_metadata                :jsonb
+#  transaction_name                    :string
 #  trigger                             :integer          default("interval"), not null
 #  created_at                          :datetime         not null
 #  updated_at                          :datetime         not null
